@@ -103,7 +103,7 @@ pub fn write_normalization_blocks<T, E>(
                 .iter()
                 .all(|&e| e.into() == 0)
             {
-                assert!(end < tables.continuous_block_end);
+                assert!(end - 1 <= tables.continuous_block_end);
                 return;
             }
 

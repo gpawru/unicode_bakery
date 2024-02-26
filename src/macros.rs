@@ -1,10 +1,10 @@
 #[macro_export]
 macro_rules! tables {
-    ($name:expr, $bsize:expr, $cont:expr, $can:expr, $patches:expr, $filters:expr) => {
+    ($name:expr, $encoder:ident, $bsize:expr, $cont:expr, $can:expr, $patches:expr, $filters:expr) => {
         let tables = NormalizationTables::build(
             $bsize,
             $cont,
-            &EncodeDecomposition { is_canonical: $can },
+            &$encoder { is_canonical: $can },
             $patches,
             $filters,
         );

@@ -3,35 +3,19 @@ use unicode_data::{codepoint::Codepoint, UNICODE};
 use super::*;
 use crate::stats;
 
-pub mod patches;
-pub mod u32;
-
-/// стартер без декомпозиции
-pub const MARKER_STARTER: u64 = 0b_000;
-/// нестартер без декомпозиции
-pub const MARKER_NONSTARTER: u64 = 0b_001;
-/// пара
-pub const MARKER_PAIR: u64 = 0b_010;
-/// синглтон
-pub const MARKER_SINGLETON: u64 = 0b_011;
-/// декомпозиция, вынесенная во внешний блок
-pub const MARKER_EXPANSION: u64 = 0b_100;
-/// слог хангыль
-pub const MARKER_HANGUL: u64 = 0b_101;
-
-pub struct EncodeDecomposition
+pub struct EncodeDecomposition32
 {
     pub is_canonical: bool,
 }
 
-impl EncodeCodepoint<u64, u32> for EncodeDecomposition
+impl EncodeCodepoint<u32, u32> for EncodeDecomposition32
 {
     fn encode(
         &self,
         codepoint: &Codepoint,
         exp_position: usize,
         stats: &mut stats::EncodeCodepointStats,
-    ) -> Option<EncodedCodepoint<u64, u32>>
+    ) -> Option<EncodedCodepoint<u32, u32>>
     {
         let decomposition = match self.is_canonical {
             true => &codepoint.canonical_decomposition,
@@ -42,13 +26,11 @@ impl EncodeCodepoint<u64, u32> for EncodeDecomposition
             starter,
             nonstarter,
             singleton,
-            pair,
-            triple,
-            triple18,
+            pair16,
             starters_to_nonstarters,
             nonstarter_decomposition,
-            long_starters_start_end,
-            more_than_3_other,
+            starters_start_end,
+            other,
         ];
 
         let value = variants
@@ -72,10 +54,10 @@ impl EncodeCodepoint<u64, u32> for EncodeDecomposition
         }
     }
 
-    fn default(&self) -> &EncodedCodepoint<u64, u32>
+    fn default(&self) -> &EncodedCodepoint<u32, u32>
     {
         &EncodedCodepoint {
-            value: MARKER_STARTER,
+            value: MARKER_STARTER as u32,
             extra: None,
         }
     }
@@ -98,7 +80,7 @@ macro_rules! encoded {
 
         $stats.inc($codepoint.code, description);
         Some(EncodedCodepoint {
-            value: $marker | ($value as u64),
+            value: ($marker as u32) | ($value as u32),
             extra: $expansion,
         })
     }};
@@ -110,8 +92,8 @@ macro_rules! encoded {
 macro_rules! codepoint_values {
     ($code:expr) => {{
         let codepoint = &UNICODE[&$code];
-        let ccc = codepoint.ccc.compressed() as u64;
-        (codepoint, $code as u64, ccc)
+        let ccc = codepoint.ccc.compressed() as u32;
+        (codepoint, $code, ccc)
     }};
 }
 
@@ -134,33 +116,33 @@ macro_rules! expansion {
 
 /// обычный стартер без декомпозиции
 ///
-/// mmmm mmmm  ____ ____    ____ ____  ____ ____    ____ ____  ____ ____    ____ ____  ____ ____
+/// mmmm mmmm  ____ ____    ____ ____  ____ ____
 ///
 fn starter(
     codepoint: &Codepoint,
     decomposition: &Vec<u32>,
     _exp_position: usize,
     _stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     blocking_checks!(codepoint.is_nonstarter(), !decomposition.is_empty());
 
     Some(EncodedCodepoint {
-        value: MARKER_STARTER,
+        value: MARKER_STARTER as u32,
         extra: None,
     })
 }
 
 /// нестартер
 ///
-/// mmmm mmmm  cccc ccxx    xxxx xxxx  xxxx xxxx    ____ ____  ____ ____    ____ ____  ____ ____
+/// mmmm mmmm  cccc ccxx    xxxx xxxx  xxxx xxxx
 ///
 fn nonstarter(
     codepoint: &Codepoint,
     decomposition: &Vec<u32>,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("нестартер");
 
@@ -183,14 +165,14 @@ fn nonstarter(
 
 /// синглтон
 ///
-/// mmmm mmmm  0000 00xx    xxxx xxxx  xxxx xxxx    ____ ____  ____ ____    ____ ____  ____ ____
+/// mmmm mmmm  0000 00xx    xxxx xxxx  xxxx xxxx
 ///
 fn singleton(
     codepoint: &Codepoint,
     decomposition: &Vec<u32>,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("синглтон");
 
@@ -200,82 +182,39 @@ fn singleton(
         UNICODE[&decomposition[0]].is_nonstarter()
     );
 
-    let c0 = decomposition[0] as u64;
+    let c0 = decomposition[0];
 
     encoded!(MARKER_SINGLETON, c0 << 14, None; se, codepoint)
 }
 
 /// пара (первый кодпоинт - стартер)
 ///
-/// mmmm mmmm  0000 00xx    xxxx xxxx  xxxx xxxx    cccc ccyy  yyyy yyyy    yyyy yyyy  ____ ____
+/// xxxx xxxx  xxxx xxxx    yyyy yyyy  yyyy yyyy
 ///
-fn pair(
+fn pair16(
     codepoint: &Codepoint,
     decomposition: &Vec<u32>,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("пара");
 
     blocking_checks!(
         codepoint.is_nonstarter(),
         decomposition.len() != 2,
-        UNICODE[&decomposition[0]].is_nonstarter()
+        UNICODE[&decomposition[0]].is_nonstarter(),
+        decomposition.iter().any(|&c| c > 0xFFFF)
     );
 
-    let c0 = decomposition[0] as u64;
-    let (c1_codepoint, c1, c1_ccc) = codepoint_values!(decomposition[1]);
+    let c0 = decomposition[0] as u32;
+    let (c1_codepoint, c1, _) = codepoint_values!(decomposition[1]);
 
     let description = format!("U+{:04X} (0) U+{:04X} ({})", c0, c1, c1_codepoint.ccc.u8());
 
     encoded!(
-        MARKER_PAIR,
-        (c0 << 14) | (c1_ccc << 32) | (c1 << 38),
-        None;
-        se,
-        codepoint,
-        description
-    )
-}
-
-/// тройка (16 бит) (первый кодпоинт - стартер)
-///
-/// xxxx xxxx  xxxx xxxx    cccc ccyy  yyyy yyyy    yyyy yycc  cccc zzzz    zzzz zzzz  zzzz ____
-///
-fn triple(
-    codepoint: &Codepoint,
-    decomposition: &Vec<u32>,
-    _exp_position: usize,
-    stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
-{
-    let se = stats.touch("тройка (16)");
-
-    blocking_checks!(
-        codepoint.is_nonstarter(),
-        decomposition.len() != 3,
-        UNICODE[&decomposition[0]].is_nonstarter(),
-        decomposition.iter().any(|c| UNICODE[c].code > 0xFFFF)
-    );
-
-    let c0 = decomposition[0] as u64;
-
-    let (c1_codepoint, c1, c1_ccc) = codepoint_values!(decomposition[1]);
-    let (c2_codepoint, c2, c2_ccc) = codepoint_values!(decomposition[2]);
-
-    let description = format!(
-        "U+{:04X} (0) U+{:04X} ({}) U+{:04X} ({})",
-        c0,
-        c1,
-        c1_codepoint.ccc.u8(),
-        c2,
-        c2_codepoint.ccc.u8()
-    );
-
-    encoded!(
         0,
-        c0 | (c1_ccc << 16) | (c1 << 22) | (c2_ccc << 38) | (c2 << 44),
+        c0 | (c1 << 16),
         None;
         se,
         codepoint,
@@ -287,13 +226,13 @@ macro_rules! fn_expansion {
     ($fn:ident, $description:expr, $codepoint:ident, $decomposition: ident; $($expr: expr),+) => {
         #[doc = $description]
         #[doc = ""]
-        #[doc = "mmmm mmmm  nnnn nnnn    iiii iiii  iiii iiii    ____ ____  ____ ____    ____ ____  ____ ____"]
+        #[doc = "mmmm mmmm  nnnn nnnn    iiii iiii  iiii iiii"]
         fn $fn(
             $codepoint: &Codepoint,
             $decomposition: &Vec<u32>,
             exp_position: usize,
             stats: &mut EncodeCodepointStats,
-        ) -> Option<EncodedCodepoint<u64, u32>>
+        ) -> Option<EncodedCodepoint<u32, u32>>
         {
             let se = stats.touch($description);
 
@@ -301,27 +240,14 @@ macro_rules! fn_expansion {
                 return None;
             }
 
-            let n = $decomposition.len() as u64;
-            let p = exp_position as u64;
+            let n = $decomposition.len() as u32;
+            let p = exp_position as u32;
             let (expansion, description) = expansion!($decomposition);
 
             encoded!(MARKER_EXPANSION, (n << 8) | (p << 16), Some(expansion); se, $codepoint, description)
         }
-
     }
 }
-
-fn_expansion!(
-    triple18,
-    "тройка (18)",
-    codepoint, decomposition;
-
-    codepoint.is_nonstarter(),
-    decomposition.len() != 3,
-    UNICODE[&decomposition[0]].is_nonstarter(),
-    decomposition.iter().all(|c| UNICODE[c].code <= 0xFFFF)
-
-);
 
 fn_expansion!(
     starters_to_nonstarters,
@@ -342,21 +268,21 @@ fn_expansion!(
 );
 
 fn_expansion!(
-    long_starters_start_end,
-    "декомпозиция > 3 кодпоинтов, первый и последний - стартеры",
+    starters_start_end,
+    "первый и последний - стартеры",
     codepoint, decomposition;
 
     codepoint.is_nonstarter(),
-    decomposition.len() < 4,
+    decomposition.len() < 2,
     UNICODE[&decomposition[0]].is_nonstarter(),
     UNICODE[&decomposition.last().unwrap()].is_nonstarter()
 );
 
 fn_expansion!(
-    more_than_3_other,
-    "декомпозиция > 3 кодпоинтов, прочие кейсы",
+    other,
+    "прочие кейсы",
     codepoint, decomposition;
 
     codepoint.is_nonstarter(),
-    decomposition.len() < 4
+    decomposition.len() < 2
 );
