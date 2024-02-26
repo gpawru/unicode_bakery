@@ -77,7 +77,7 @@ pub fn write_normalization_blocks<T, E>(
 {
     let mut file = File::create(filename.as_ref()).unwrap();
 
-    let empty_block_index = tables
+    let empty_block_index = *tables
         .index
         .iter()
         .find(|&&b| {
@@ -87,12 +87,10 @@ pub fn write_normalization_blocks<T, E>(
         })
         .unwrap();
 
-    tables.index.iter().for_each(|&i| {
-        if tables.index[i as usize] == *empty_block_index {
+    tables.index.iter().enumerate().for_each(|(i, &d)| {
+        if d == empty_block_index {
             return;
         }
-
-        let d = tables.index[i as usize];
 
         let start = d * tables.block_size;
         let end = (d + 1) * tables.block_size;
