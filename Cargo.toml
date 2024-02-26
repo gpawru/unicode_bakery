@@ -1,0 +1,7 @@
+[package]
+name = "unicode_bakery"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+unicode_data = { git = "https://github.com/gpawru/unicode_data.git" }
