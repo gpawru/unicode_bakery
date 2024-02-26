@@ -123,7 +123,7 @@ macro_rules! expansion {
         $decomposition.iter().for_each(|c| {
             let codepoint = &UNICODE[c];
 
-            expansion.push((codepoint.code << 6) | (codepoint.ccc.compressed() as u32));
+            expansion.push((codepoint.code << 8) | (codepoint.ccc.compressed() as u32));
             description
                 .push_str(format!("U+{:04X} ({}) ", codepoint.code, codepoint.ccc.u8()).as_str());
         });
