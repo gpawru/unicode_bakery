@@ -87,37 +87,43 @@ pub fn write_normalization_blocks<T, E>(
         })
         .unwrap();
 
-    tables.index.iter().enumerate().for_each(|(i, &d)| {
-        if d == empty_block_index {
-            return;
-        }
-
-        let start = d * tables.block_size;
-        let end = (d + 1) * tables.block_size;
-
-        if tables.data[start as usize .. end as usize]
-            .iter()
-            .all(|&e| e.into() == 0)
-        {
-            assert!(end < tables.continuous_block_end);
-            return;
-        }
-
-        writeln!(file, "#{} -> 0x{:02X}\n", i, d).unwrap();
-
-        for c in start .. end {
-            if tables.data[c as usize].into() == 0 {
-                continue;
+    tables
+        .index
+        .iter()
+        .enumerate()
+        .for_each(|(index, &data_index)| {
+            if data_index == empty_block_index {
+                return;
             }
 
-            match UNICODE.get(&c) {
-                Some(codepoint) => {
-                    writeln!(file, "U+{:04X} - {}", codepoint.code, codepoint.name).unwrap()
-                }
-                None => writeln!(file, "U+{:04X}", c).unwrap(),
-            };
-        }
+            let start = data_index * tables.block_size;
+            let end = (data_index + 1) * tables.block_size;
 
-        writeln!(file).unwrap();
-    })
+            if tables.data[start as usize .. end as usize]
+                .iter()
+                .all(|&e| e.into() == 0)
+            {
+                assert!(end < tables.continuous_block_end);
+                return;
+            }
+
+            writeln!(file, "#{} -> 0x{:02X}\n", index, data_index).unwrap();
+
+            for offset in 0 .. tables.block_size {
+                if tables.data[(start + offset) as usize].into() == 0 {
+                    continue;
+                }
+
+                let code = (index as u32) * tables.block_size + offset as u32;
+
+                match UNICODE.get(&code) {
+                    Some(codepoint) => {
+                        writeln!(file, "U+{:04X} - {}", codepoint.code, codepoint.name).unwrap()
+                    }
+                    None => writeln!(file, "U+{:04X}", code).unwrap(),
+                };
+            }
+
+            writeln!(file).unwrap();
+        })
 }
