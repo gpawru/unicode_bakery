@@ -153,7 +153,7 @@ fn starter(
 
 /// нестартер
 ///
-/// mmmm mmmm  cccc ccxx    xxxx xxxx  xxxx xxxx    ____ ____  ____ ____    ____ ____  ____ ____
+/// mmmm mmmm  cccc cccc    xxxx xxxx  xxxx xxxx    xx__ ____  ____ ____    ____ ____  ____ ____
 ///
 fn nonstarter(
     codepoint: &Codepoint,
@@ -173,7 +173,7 @@ fn nonstarter(
 
     encoded!(
         MARKER_NONSTARTER,
-        (c0_ccc << 8) | (c0 << 14),
+        (c0_ccc << 8) | (c0 << 16),
         None;
         se,
         codepoint,
@@ -183,7 +183,7 @@ fn nonstarter(
 
 /// синглтон
 ///
-/// mmmm mmmm  0000 00xx    xxxx xxxx  xxxx xxxx    ____ ____  ____ ____    ____ ____  ____ ____
+/// mmmm mmmm  0000 0000    xxxx xxxx  xxxx xxxx    xx__ ____  ____ ____    ____ ____  ____ ____
 ///
 fn singleton(
     codepoint: &Codepoint,
@@ -202,12 +202,12 @@ fn singleton(
 
     let c0 = decomposition[0] as u64;
 
-    encoded!(MARKER_SINGLETON, c0 << 14, None; se, codepoint)
+    encoded!(MARKER_SINGLETON, c0 << 16, None; se, codepoint)
 }
 
 /// пара (первый кодпоинт - стартер)
 ///
-/// mmmm mmmm  0000 00xx    xxxx xxxx  xxxx xxxx    cccc ccyy  yyyy yyyy    yyyy yyyy  ____ ____
+/// mmmm mmmm  xxxx xxxx    xxxx xxxx  xx__ ____    cccc cccc  yyyy yyyy    yyyy yyyy  yy__ ____
 ///
 fn pair(
     codepoint: &Codepoint,
@@ -231,7 +231,7 @@ fn pair(
 
     encoded!(
         MARKER_PAIR,
-        (c0 << 14) | (c1_ccc << 32) | (c1 << 38),
+        (c0 << 8) | (c1_ccc << 32) | (c1 << 40),
         None;
         se,
         codepoint,
@@ -241,7 +241,7 @@ fn pair(
 
 /// тройка (16 бит) (первый кодпоинт - стартер)
 ///
-/// xxxx xxxx  xxxx xxxx    cccc ccyy  yyyy yyyy    yyyy yycc  cccc zzzz    zzzz zzzz  zzzz ____
+/// xxxx xxxx  xxxx xxxx    cccc cccc  yyyy yyyy    yyyy yyyy  cccc cccc    zzzz zzzz  zzzz zzzz
 ///
 fn triple(
     codepoint: &Codepoint,
@@ -275,7 +275,7 @@ fn triple(
 
     encoded!(
         0,
-        c0 | (c1_ccc << 16) | (c1 << 22) | (c2_ccc << 38) | (c2 << 44),
+        c0 | (c1_ccc << 16) | (c1 << 24) | (c2_ccc << 40) | (c2 << 48),
         None;
         se,
         codepoint,
