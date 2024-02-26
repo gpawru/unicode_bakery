@@ -103,7 +103,7 @@ pub fn write_normalization_blocks<T, E>(
             return;
         }
 
-        writeln!(file, "# {}\n", i).unwrap();
+        writeln!(file, "#{} -> 0x{:02X}\n", i, d).unwrap();
 
         for c in start .. end {
             if tables.data[c as usize].into() == 0 {
