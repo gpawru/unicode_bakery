@@ -4,7 +4,6 @@ use crate::{stats::EncodeCodepointStats, tables::NormalizationTables};
 
 pub mod composing;
 pub mod decomposing;
-mod macros;
 
 /// закодированный кодпоинт
 #[derive(Debug, Clone)]

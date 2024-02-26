@@ -6,23 +6,30 @@ use tables::NormalizationTables;
 
 mod encode;
 mod filter;
+mod macros;
 mod output;
 mod stats;
 mod tables;
 
 fn main()
 {
-    let nfd = NormalizationTables::build(
+    // NFD
+    tables!(
+        "nfd",
         128,
         0xFFF,
-        &EncodeDecomposition { is_canonical: true },
+        true,
         Some(&[&DefaultPatch, &HangulPatch]),
-        None,
+        None
     );
 
-    write_normalization_tables("./data/nfd.rs.txt", &nfd);
-    write_normalization_stats("./data_stats/nfd.stats.txt", &nfd.stats);
-    write_normalization_blocks("./data_stats/nfd.blocks.txt", &nfd);
-
-    println!("NFD: {} kb", nfd.size() / 1024);
+    // NFKD
+    tables!(
+        "nfkd",
+        128,
+        0xFFF,
+        false,
+        Some(&[&DefaultPatch, &HangulPatch]),
+        None
+    );
 }
