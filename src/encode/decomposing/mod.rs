@@ -12,10 +12,10 @@ pub const MARKER_STARTER: u64 = 0b_000;
 pub const MARKER_NONSTARTER: u64 = 0b_001;
 /// пара
 pub const MARKER_PAIR: u64 = 0b_010;
-/// синглтон
-pub const MARKER_SINGLETON: u64 = 0b_011;
 /// декомпозиция, вынесенная во внешний блок
-pub const MARKER_EXPANSION: u64 = 0b_100;
+pub const MARKER_EXPANSION: u64 = 0b_011;
+/// синглтон
+pub const MARKER_SINGLETON: u64 = 0b_100;
 /// слог хангыль
 pub const MARKER_HANGUL: u64 = 0b_101;
 
