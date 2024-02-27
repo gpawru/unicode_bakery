@@ -1,4 +1,5 @@
-use crate::encode::decomposing::MARKER_HANGUL;
+use crate::encode::decomposing::u32::MARKER_HANGUL as MARKER_HANGUL_32;
+use crate::encode::decomposing::MARKER_HANGUL as MARKER_HANGUL_64;
 use crate::encode::PatchTables;
 use crate::tables::NormalizationTables;
 
@@ -8,7 +9,7 @@ const HANGUL_SYLLABLES_LAST: u32 = 0xD7A3;
 pub struct HangulPatch;
 
 macro_rules! hangul_patch {
-    ($t:ty) => {
+    ($t:ty, $marker:expr) => {
         impl PatchTables<$t, u32> for HangulPatch
         {
             /// слоги хангыль будут ссылаться на блоки в конце таблицы данных
@@ -39,7 +40,7 @@ macro_rules! hangul_patch {
                         let code = (current_block_index * tables.block_size) + offset as u32;
 
                         if code >= HANGUL_SYLLABLES_FIRST && code <= HANGUL_SYLLABLES_LAST {
-                            *e = MARKER_HANGUL as $t;
+                            *e = $marker as $t;
                         }
                     });
 
@@ -82,5 +83,5 @@ macro_rules! hangul_patch {
     };
 }
 
-hangul_patch!(u64);
-hangul_patch!(u32);
+hangul_patch!(u64, MARKER_HANGUL_64);
+hangul_patch!(u32, MARKER_HANGUL_32);

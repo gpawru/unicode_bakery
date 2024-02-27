@@ -1,7 +1,18 @@
 use unicode_data::{codepoint::Codepoint, UNICODE};
 
-use super::*;
+use super::{EncodeCodepoint, EncodeCodepointStats, EncodedCodepoint};
 use crate::stats;
+
+/// стартер без декомпозиции
+pub const MARKER_STARTER: u32 = 0b_000;
+/// нестартер без декомпозиции
+pub const MARKER_NONSTARTER: u32 = 0b_001;
+/// синглтон
+pub const MARKER_SINGLETON: u32 = 0b_010;
+/// декомпозиция, вынесенная во внешний блок
+pub const MARKER_EXPANSION: u32 = 0b_011;
+/// слог хангыль
+pub const MARKER_HANGUL: u32 = 0b_100;
 
 pub struct EncodeDecomposition32
 {
@@ -105,7 +116,7 @@ macro_rules! expansion {
         $decomposition.iter().for_each(|c| {
             let codepoint = &UNICODE[c];
 
-            expansion.push((codepoint.code << 6) | (codepoint.ccc.compressed() as u32));
+            expansion.push((codepoint.code << 8) | (codepoint.ccc.compressed() as u32));
             description
                 .push_str(format!("U+{:04X} ({}) ", codepoint.code, codepoint.ccc.u8()).as_str());
         });
@@ -204,7 +215,8 @@ fn pair16(
         codepoint.is_nonstarter(),
         decomposition.len() != 2,
         UNICODE[&decomposition[0]].is_nonstarter(),
-        decomposition.iter().any(|&c| c > 0xFFFF)
+        decomposition.iter().any(|&c| c > 0xFFFF),
+        (decomposition[0] as u8) < (MARKER_HANGUL as u8)
     );
 
     let c0 = decomposition[0] as u32;
