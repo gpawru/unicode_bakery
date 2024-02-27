@@ -1,4 +1,5 @@
-use unicode_data::{codepoint::Codepoint, UNICODE};
+use unicode_data::codepoint::Codepoint;
+use unicode_data::{NFD, NFKD};
 
 use super::*;
 use crate::stats;
@@ -34,8 +35,8 @@ impl EncodeCodepoint<u64, u32> for EncodeDecomposition
     ) -> Option<EncodedCodepoint<u64, u32>>
     {
         let decomposition = match self.is_canonical {
-            true => &codepoint.canonical_decomposition,
-            false => &codepoint.compat_decomposition,
+            true => &NFD[&codepoint.code],
+            false => &NFKD[&codepoint.code],
         };
 
         let variants = &[
@@ -107,22 +108,12 @@ macro_rules! encoded {
     }};
 }
 
-macro_rules! codepoint_values {
-    ($code:expr) => {{
-        let codepoint = &UNICODE[&$code];
-        let ccc = codepoint.ccc.compressed() as u64;
-        (codepoint, $code as u64, ccc)
-    }};
-}
-
 macro_rules! expansion {
     ($decomposition:expr) => {{
         let mut expansion = vec![];
         let mut description = String::new();
 
-        $decomposition.iter().for_each(|c| {
-            let codepoint = &UNICODE[c];
-
+        $decomposition.iter().for_each(|codepoint| {
             expansion.push((codepoint.code << 8) | (codepoint.ccc.compressed() as u32));
             description
                 .push_str(format!("U+{:04X} ({}) ", codepoint.code, codepoint.ccc.u8()).as_str());
@@ -138,7 +129,7 @@ macro_rules! expansion {
 ///
 fn starter(
     codepoint: &Codepoint,
-    decomposition: &Vec<u32>,
+    decomposition: &Vec<Codepoint>,
     _exp_position: usize,
     _stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64, u32>>
@@ -157,7 +148,7 @@ fn starter(
 ///
 fn nonstarter(
     codepoint: &Codepoint,
-    decomposition: &Vec<u32>,
+    decomposition: &Vec<Codepoint>,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64, u32>>
@@ -187,7 +178,7 @@ fn nonstarter(
 ///
 fn singleton(
     codepoint: &Codepoint,
-    decomposition: &Vec<u32>,
+    decomposition: &Vec<Codepoint>,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64, u32>>
@@ -197,10 +188,10 @@ fn singleton(
     blocking_checks!(
         codepoint.is_nonstarter(),
         decomposition.len() != 1,
-        UNICODE[&decomposition[0]].is_nonstarter()
+        decomposition[0].is_nonstarter()
     );
 
-    let c0 = decomposition[0] as u64;
+    let c0 = decomposition[0].code as u64;
 
     encoded!(MARKER_SINGLETON, c0 << 16, None; se, codepoint)
 }
@@ -211,7 +202,7 @@ fn singleton(
 ///
 fn pair(
     codepoint: &Codepoint,
-    decomposition: &Vec<u32>,
+    decomposition: &Vec<Codepoint>,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64, u32>>
@@ -221,13 +212,19 @@ fn pair(
     blocking_checks!(
         codepoint.is_nonstarter(),
         decomposition.len() != 2,
-        UNICODE[&decomposition[0]].is_nonstarter()
+        decomposition[0].is_nonstarter()
     );
 
-    let c0 = decomposition[0] as u64;
-    let (c1_codepoint, c1, c1_ccc) = codepoint_values!(decomposition[1]);
+    let c0 = decomposition[0].code as u64;
+    let c1 = decomposition[1].code as u64;
+    let c1_ccc = decomposition[1].ccc.compressed() as u64;
 
-    let description = format!("U+{:04X} (0) U+{:04X} ({})", c0, c1, c1_codepoint.ccc.u8());
+    let description = format!(
+        "U+{:04X} (0) U+{:04X} ({})",
+        c0,
+        c1,
+        decomposition[1].ccc.u8()
+    );
 
     encoded!(
         MARKER_PAIR,
@@ -245,7 +242,7 @@ fn pair(
 ///
 fn triple(
     codepoint: &Codepoint,
-    decomposition: &Vec<u32>,
+    decomposition: &Vec<Codepoint>,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64, u32>>
@@ -255,22 +252,24 @@ fn triple(
     blocking_checks!(
         codepoint.is_nonstarter(),
         decomposition.len() != 3,
-        UNICODE[&decomposition[0]].is_nonstarter(),
-        decomposition.iter().any(|c| UNICODE[c].code > 0xFFFF)
+        decomposition[0].is_nonstarter(),
+        decomposition.iter().any(|c| c.code > 0xFFFF)
     );
 
-    let c0 = decomposition[0] as u64;
+    let c0 = decomposition[0].code as u64;
+    let c1 = decomposition[1].code as u64;
+    let c2 = decomposition[2].code as u64;
 
-    let (c1_codepoint, c1, c1_ccc) = codepoint_values!(decomposition[1]);
-    let (c2_codepoint, c2, c2_ccc) = codepoint_values!(decomposition[2]);
+    let c1_ccc = decomposition[1].ccc.compressed() as u64;
+    let c2_ccc = decomposition[2].ccc.compressed() as u64;
 
     let description = format!(
         "U+{:04X} (0) U+{:04X} ({}) U+{:04X} ({})",
         c0,
         c1,
-        c1_codepoint.ccc.u8(),
+        decomposition[1].ccc.u8(),
         c2,
-        c2_codepoint.ccc.u8()
+        decomposition[2].ccc.u8()
     );
 
     encoded!(
@@ -290,7 +289,7 @@ macro_rules! fn_expansion {
         #[doc = "mmmm mmmm  nnnn nnnn    iiii iiii  iiii iiii    ____ ____  ____ ____    ____ ____  ____ ____"]
         fn $fn(
             $codepoint: &Codepoint,
-            $decomposition: &Vec<u32>,
+            $decomposition: &Vec<Codepoint>,
             exp_position: usize,
             stats: &mut EncodeCodepointStats,
         ) -> Option<EncodedCodepoint<u64, u32>>
@@ -307,7 +306,6 @@ macro_rules! fn_expansion {
 
             encoded!(MARKER_EXPANSION, (n << 8) | (p << 16), Some(expansion); se, $codepoint, description)
         }
-
     }
 }
 
@@ -318,8 +316,8 @@ fn_expansion!(
 
     codepoint.is_nonstarter(),
     decomposition.len() != 3,
-    UNICODE[&decomposition[0]].is_nonstarter(),
-    decomposition.iter().all(|c| UNICODE[c].code <= 0xFFFF)
+    decomposition[0].is_nonstarter(),
+    decomposition.iter().all(|c| c.code <= 0xFFFF)
 
 );
 
@@ -329,7 +327,7 @@ fn_expansion!(
     codepoint, decomposition;
 
     codepoint.is_nonstarter(),
-    decomposition.iter().any(|c| UNICODE[c].is_starter())
+    decomposition.iter().any(|c| c.is_starter())
 );
 
 fn_expansion!(
@@ -338,7 +336,7 @@ fn_expansion!(
     codepoint, decomposition;
 
     codepoint.is_starter(),
-    decomposition.iter().any(|c| UNICODE[c].is_starter())
+    decomposition.iter().any(|c| c.is_starter())
 );
 
 fn_expansion!(
@@ -348,8 +346,8 @@ fn_expansion!(
 
     codepoint.is_nonstarter(),
     decomposition.len() < 4,
-    UNICODE[&decomposition[0]].is_nonstarter(),
-    UNICODE[&decomposition.last().unwrap()].is_nonstarter()
+    decomposition[0].is_nonstarter(),
+    decomposition.last().unwrap().is_nonstarter()
 );
 
 fn_expansion!(
