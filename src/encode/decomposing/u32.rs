@@ -146,7 +146,7 @@ fn starter(
 
 /// нестартер
 ///
-/// mmmm mmmm  cccc ccxx    xxxx xxxx  xxxx xxxx
+/// mmmm mmmm  cccc cc__    ____ ____  ____ ____
 ///
 fn nonstarter(
     codepoint: &Codepoint,
@@ -159,14 +159,13 @@ fn nonstarter(
 
     blocking_checks!(codepoint.is_starter(), !decomposition.is_empty());
 
-    let c0 = codepoint.code as u64;
-    let c0_ccc = codepoint.ccc.compressed() as u64;
+    let ccc = codepoint.ccc.compressed() as u32;
 
     let description = format!("({})", codepoint.ccc.u8());
 
     encoded!(
         MARKER_NONSTARTER,
-        (c0_ccc << 8) | (c0 << 14),
+        ccc << 8,
         None;
         se,
         codepoint,
@@ -176,7 +175,7 @@ fn nonstarter(
 
 /// синглтон
 ///
-/// mmmm mmmm  0000 00xx    xxxx xxxx  xxxx xxxx
+/// mmmm mmmm  xxxx xxxx    xxxx xxxx  xx__ ____
 ///
 fn singleton(
     codepoint: &Codepoint,
@@ -195,7 +194,7 @@ fn singleton(
 
     let c0 = decomposition[0];
 
-    encoded!(MARKER_SINGLETON, c0 << 14, None; se, codepoint)
+    encoded!(MARKER_SINGLETON, c0 << 8, None; se, codepoint)
 }
 
 /// пара (первый кодпоинт - стартер)
