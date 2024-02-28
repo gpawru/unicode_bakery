@@ -82,14 +82,14 @@ pub fn compositions() -> (
     let mut combining_backwards: Vec<&u32> = COMBINES_BACKWARDS.keys().collect();
     combining_backwards.sort();
 
-    for starter in combining_backwards {
-        let pairs = &COMBINES_BACKWARDS[starter];
+    for &starter in combining_backwards {
+        let pairs = &COMBINES_BACKWARDS[&starter];
 
         let mut prevs: Vec<&u32> = pairs.keys().collect();
         prevs.sort();
 
         backwards_indexes.insert(
-            *starter,
+            starter,
             CompositionInfo {
                 index: data.len() as u16,
                 count: prevs.len() as u8,

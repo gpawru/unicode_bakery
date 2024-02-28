@@ -447,7 +447,7 @@ fn two_starters_nonstarter(
     // N - только в NFKC - декомпозиция происходит всегда
     assert_qc!(qc, 'N');
 
-    let c1 = precomposition[0].code;
+    let c1 = precomposition[1].code;
     let combining = encoder.combination_info(c1) as u64;
 
     expansion_entry!(MARKER_EXPANSION_TWO_STARTERS_NONSTARTER, qc, combining, &precomposition, exp_position; se, codepoint)
