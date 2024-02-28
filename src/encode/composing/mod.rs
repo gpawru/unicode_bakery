@@ -137,7 +137,7 @@ impl EncodeCodepoint<u64, u32> for EncodeComposition
 
         let value = value.unwrap();
 
-        match (value.value as u8) == 0 {
+        match value.value == 0 {
             true => None,
             false => Some(value),
         }
