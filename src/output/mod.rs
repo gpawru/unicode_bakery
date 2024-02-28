@@ -6,18 +6,19 @@ use unicode_data::UNICODE;
 
 use crate::stats::EncodeCodepointStats;
 use crate::tables::NormalizationTables;
+pub use format::format_num_vec;
 
-use self::format::format_num_vec;
-
-pub mod format;
+mod format;
 
 /// длина строки в файле с подготовленными данными
-const FORMAT_STRING_LENGTH: usize = 120;
+pub const FORMAT_STRING_LENGTH: usize = 120;
 
 /// записать таблицы нормализации
 pub fn write_normalization_tables<T, E>(
+    table_type: impl AsRef<str>,
     filename: impl AsRef<str>,
     tables: &NormalizationTables<T, E>,
+    extra: impl AsRef<str>,
 ) where
     T: UpperHex + Into<u64> + Copy,
     E: UpperHex + Into<u64> + Copy,
@@ -25,15 +26,17 @@ pub fn write_normalization_tables<T, E>(
     let mut file = File::create(filename.as_ref()).unwrap();
 
     let output = format!(
-        "DecompositionData {{\n  \
+        "{} {{\n  \
             index: &[{}  ],\n  \
             data: &[{}  ],\n  \
-            expansions: &[{}  ],\n  \
+            expansions: &[{}  ],\n  {}\
             continuous_block_end: 0x{:04X},\n\
         }}\n",
+        table_type.as_ref(),
         format_num_vec(tables.index.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.data.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.expansions.as_slice(), FORMAT_STRING_LENGTH),
+        extra.as_ref(),
         tables.continuous_block_end,
     );
 

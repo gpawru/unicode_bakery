@@ -4,11 +4,12 @@ use encode::decomposing::EncodeDecomposition;
 use output::*;
 use tables::NormalizationTables;
 
+use crate::encode::composing::EncodeComposition;
 use crate::encode::decomposing::u32::EncodeDecomposition32;
 
+mod common;
 mod encode;
 mod filter;
-mod macros;
 mod output;
 mod stats;
 mod tables;
@@ -16,7 +17,7 @@ mod tables;
 fn main()
 {
     // NFD
-    tables!(
+    decomposition_tables!(
         "nfd",
         EncodeDecomposition,
         128,
@@ -27,7 +28,7 @@ fn main()
     );
 
     // NFKD
-    tables!(
+    decomposition_tables!(
         "nfkd",
         EncodeDecomposition,
         128,
@@ -38,7 +39,7 @@ fn main()
     );
 
     // NFD
-    tables!(
+    decomposition_tables!(
         "nfd.u32",
         EncodeDecomposition32,
         128,
@@ -49,13 +50,33 @@ fn main()
     );
 
     // NFKD
-    tables!(
+    decomposition_tables!(
         "nfkd.u32",
         EncodeDecomposition32,
         128,
         0xFFF,
         false,
         Some(&[&DefaultPatch, &HangulPatch]),
+        None
+    );
+
+    // NFC
+    composition_tables!(
+        "nfc",
+        EncodeComposition::new(true),
+        128,
+        0xFFF,
+        Some(&[&DefaultPatch]),
+        None
+    );
+
+    // // NFKC
+    composition_tables!(
+        "nfkc",
+        EncodeComposition::new(false),
+        128,
+        0xFFF,
+        Some(&[&DefaultPatch]),
         None
     );
 }

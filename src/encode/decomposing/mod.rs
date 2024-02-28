@@ -2,6 +2,9 @@ use unicode_data::codepoint::Codepoint;
 use unicode_data::{NFD, NFKD};
 
 use super::*;
+use crate::blocking_checks;
+use crate::common::starters_map;
+use crate::expansion;
 use crate::stats;
 
 pub mod patches;
@@ -67,7 +70,7 @@ impl EncodeCodepoint<u64, u32> for EncodeDecomposition
 
         let value = value.unwrap();
 
-        match (value.value as u8) == (MARKER_STARTER as u8) {
+        match (value.value as u8) == 0 {
             true => None,
             false => Some(value),
         }
@@ -80,14 +83,6 @@ impl EncodeCodepoint<u64, u32> for EncodeDecomposition
             extra: None,
         }
     }
-}
-
-macro_rules! blocking_checks {
-    ($($expr: expr),+) => {
-        if $($expr ||)+ false {
-            return None;
-        }
-    };
 }
 
 macro_rules! encoded {
@@ -108,20 +103,7 @@ macro_rules! encoded {
     }};
 }
 
-macro_rules! expansion {
-    ($decomposition:expr) => {{
-        let mut expansion = vec![];
-        let mut description = String::new();
-
-        $decomposition.iter().for_each(|codepoint| {
-            expansion.push((codepoint.code << 8) | (codepoint.ccc.compressed() as u32));
-            description
-                .push_str(format!("U+{:04X} ({}) ", codepoint.code, codepoint.ccc.u8()).as_str());
-        });
-
-        (expansion, description)
-    }};
-}
+// P.S. схема данных представлена в LE
 
 /// обычный стартер без декомпозиции
 ///
@@ -187,8 +169,7 @@ fn singleton(
 
     blocking_checks!(
         codepoint.is_nonstarter(),
-        decomposition.len() != 1,
-        decomposition[0].is_nonstarter()
+        starters_map(decomposition) != "s"
     );
 
     let c0 = decomposition[0].code as u64;
@@ -211,8 +192,7 @@ fn pair(
 
     blocking_checks!(
         codepoint.is_nonstarter(),
-        decomposition.len() != 2,
-        decomposition[0].is_nonstarter()
+        !["sn", "ss"].contains(&starters_map(decomposition).as_str())
     );
 
     let c0 = decomposition[0].code as u64;
@@ -251,8 +231,7 @@ fn triple(
 
     blocking_checks!(
         codepoint.is_nonstarter(),
-        decomposition.len() != 3,
-        decomposition[0].is_nonstarter(),
+        !["snn", "ssn", "sss", "sns"].contains(&starters_map(decomposition).as_str()),
         decomposition.iter().any(|c| c.code > 0xFFFF)
     );
 
@@ -315,8 +294,7 @@ fn_expansion!(
     codepoint, decomposition;
 
     codepoint.is_nonstarter(),
-    decomposition.len() != 3,
-    decomposition[0].is_nonstarter(),
+    !["snn", "ssn", "sss", "sns"].contains(&starters_map(decomposition).as_str()),
     decomposition.iter().all(|c| c.code <= 0xFFFF)
 
 );
