@@ -306,7 +306,7 @@ fn singleton(
 
 /// нестартер без декомпозиции
 ///
-/// qmmm cccc  cccc ____    ____ ____  ____ ____    ____ ____  ____ ____    ____ ____  ____ ____
+/// qmmm ____  cccc cccc    ____ ____  ____ ____    ____ ____  ____ ____    ____ ____  ____ ____
 ///
 fn nonstarter(
     _encoder: &EncodeComposition,
@@ -328,7 +328,7 @@ fn nonstarter(
 
     let ccc = codepoint.ccc.compressed() as u64;
 
-    encoded!(MARKER_NONSTARTER, 'N', (ccc << 4), None; se, codepoint)
+    encoded!(MARKER_NONSTARTER, 'N', (ccc << 8), None; se, codepoint)
 }
 
 /// пара стартер + нестартер
