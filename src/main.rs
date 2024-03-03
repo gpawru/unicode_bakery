@@ -1,11 +1,12 @@
 use encode::decomposing::patches::default::DefaultPatch;
 use encode::decomposing::patches::hangul::HangulPatch;
-use encode::decomposing::EncodeDecomposition;
 use output::*;
 use tables::NormalizationTables;
 
-use crate::encode::composing::EncodeComposition;
-use crate::encode::decomposing::u32::EncodeDecomposition32;
+use encode::composing::u32::EncodeComposition32;
+use encode::composing::EncodeComposition;
+use encode::decomposing::u32::EncodeDecomposition32;
+use encode::decomposing::EncodeDecomposition;
 
 mod common;
 mod encode;
@@ -18,7 +19,7 @@ fn main()
 {
     // NFD
     decomposition_tables!(
-        "nfd",
+        "nfd.u64",
         EncodeDecomposition,
         128,
         0xFFF,
@@ -29,7 +30,7 @@ fn main()
 
     // NFKD
     decomposition_tables!(
-        "nfkd",
+        "nfkd.u64",
         EncodeDecomposition,
         128,
         0xFFF,
@@ -62,7 +63,7 @@ fn main()
 
     // NFC
     composition_tables!(
-        "nfc",
+        "nfc.u64",
         EncodeComposition::new(true),
         128,
         0xFFF,
@@ -72,8 +73,28 @@ fn main()
 
     // // NFKC
     composition_tables!(
-        "nfkc",
+        "nfkc.u64",
         EncodeComposition::new(false),
+        128,
+        0xFFF,
+        Some(&[&DefaultPatch]),
+        None
+    );
+
+    // NFC
+    composition_tables!(
+        "nfc.u32",
+        EncodeComposition32::new(true),
+        128,
+        0xFFF,
+        Some(&[&DefaultPatch]),
+        None
+    );
+
+    // // NFKC
+    composition_tables!(
+        "nfkc.u32",
+        EncodeComposition32::new(false),
         128,
         0xFFF,
         Some(&[&DefaultPatch]),

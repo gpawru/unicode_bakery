@@ -5,44 +5,31 @@ use unicode_data::hangul::is_composable_hangul_jamo;
 use unicode_data::{COMBINES_BACKWARDS, COMPOSITION_EXCLUSIONS};
 use unicode_data::{NFC, NFKC, QC_NFC, QC_NFKC};
 
+use super::compositions::compositions;
+use super::compositions::CompositionInfo;
 use super::{EncodeCodepoint, EncodedCodepoint};
 use crate::blocking_checks;
 use crate::common::starters_map;
 use crate::expansion;
 use crate::stats::EncodeCodepointStats;
-use compositions::compositions;
-use compositions::CompositionInfo;
-
-pub mod compositions;
-
-pub mod u32;
 
 /// стартер без декомпозиции
-pub const MARKER_STARTER: u64 = 0b_000;
-/// пара стартер + нестартер
-pub const MARKER_PAIR: u64 = 0b_001;
-/// стартер-синглтон
-pub const MARKER_SINGLETON: u64 = 0b_010;
+pub const MARKER_STARTER: u32 = 0b_000;
 /// нестартер без декомпозиции
-pub const MARKER_NONSTARTER: u64 = 0b_011;
+pub const MARKER_NONSTARTER: u32 = 0b_001;
+/// стартер-синглтон
+pub const MARKER_SINGLETON: u32 = 0b_010;
 
-// 4 маркера объединены в один кейс: 0 или несколько стартеров + 0 или несколько нестартеров
-//  - первый стартер не комбинируется с предыдущими кодпоинтами
-//  - информация о комбинировании записана для последнего стартера последовательности
-
-/// стартер и нестартеры
-pub const MARKER_EXPANSION_STARTER_NONSTARTERS: u64 = 0b_100;
-/// последовательность стартеров
-pub const MARKER_EXPANSION_STARTERS: u64 = 0b_0100;
-/// два стартера + нестартер
-pub const MARKER_EXPANSION_TWO_STARTERS_NONSTARTER: u64 = 0b_100;
-/// исключения - стартеры, которые декомпозируются в нестартеры
-pub const MARKER_NONSTARTERS_EXCLUSION: u64 = 0b_100;
+/// - стартер и нестартеры
+/// - последовательность стартеров
+/// - два стартера + нестартер
+/// - исключения - стартеры, которые декомпозируются в нестартеры
+pub const MARKER_EXPANSION: u32 = 0b_100;
 
 /// исключения - стартеры, которые комбинируются с предыдущими кодпоинтами
-pub const MARKER_COMBINES_BACKWARDS: u64 = 0b_101;
+pub const MARKER_COMBINES_BACKWARDS: u32 = 0b_11;
 
-pub struct EncodeComposition
+pub struct EncodeComposition32
 {
     pub is_canonical: bool,
     /// таблица композиций кодпоинтов в сжатом виде
@@ -53,7 +40,7 @@ pub struct EncodeComposition
     pub composition_index_backwards: HashMap<u32, CompositionInfo>,
 }
 
-impl EncodeComposition
+impl EncodeComposition32
 {
     pub fn new(is_canonical: bool) -> Self
     {
@@ -87,14 +74,14 @@ impl EncodeComposition
     }
 }
 
-impl EncodeCodepoint<u64, u32> for EncodeComposition
+impl EncodeCodepoint<u32, u32> for EncodeComposition32
 {
     fn encode(
         &self,
         codepoint: &Codepoint,
         exp_position: usize,
         stats: &mut EncodeCodepointStats,
-    ) -> Option<EncodedCodepoint<u64, u32>>
+    ) -> Option<EncodedCodepoint<u32, u32>>
     {
         let (precomposition, mut quick_check) = match self.is_canonical {
             true => (&NFC[&codepoint.code], QC_NFC[codepoint.code as usize]),
@@ -145,7 +132,7 @@ impl EncodeCodepoint<u64, u32> for EncodeComposition
         }
     }
 
-    fn default(&self) -> &EncodedCodepoint<u64, u32>
+    fn default(&self) -> &EncodedCodepoint<u32, u32>
     {
         &EncodedCodepoint {
             value: MARKER_STARTER,
@@ -169,7 +156,6 @@ impl EncodeCodepoint<u64, u32> for EncodeComposition
 //
 // pp.. - (16 бит) - индекс последовательности кодпоинтов в таблице expansions
 // nn.. - (8 бит) - количество кодпоинтов в последовательности в таблице expansions
-// tttt - (4 бита) - количество нестартеров в последовательности в таблице expansions
 
 macro_rules! assert_qc {
     ($qc: expr, $($c:expr),+) => {
@@ -200,7 +186,7 @@ macro_rules! encoded {
         };
 
         Some(EncodedCodepoint {
-            value: $marker << 1 | qc | ($value as u64),
+            value: $marker << 1 | qc | ($value as u32),
             extra: $expansion,
         })
     }};
@@ -210,9 +196,9 @@ macro_rules! encoded {
 }
 
 macro_rules! expansion_entry {
-    ($marker: expr, $fast: expr, $combining: expr, $precomposition: expr, $e_index: expr; $stats:expr, $codepoint:expr) => {{
-        let e_index = $e_index as u64;
-        let e_len = $precomposition.len() as u64;
+    ($fast: expr, $precomposition: expr, $e_index: expr; $stats:expr, $codepoint:expr) => {{
+        let e_index = $e_index as u32;
+        let e_len = $precomposition.len() as u32;
 
         assert!((e_index < 0xFFFF) && (e_len < 0xFF));
 
@@ -227,15 +213,15 @@ macro_rules! expansion_entry {
         }
 
         // количество нестартеров (располагаются только в конце)
-        let n_len = $precomposition.iter().rev().take_while(|&c| c.is_nonstarter()).count() as u64;
-        assert!(n_len <= 0b_1111);
+        let n_len = $precomposition.iter().rev().take_while(|&c| c.is_nonstarter()).count() as u32;
+        assert!(n_len <= 2);
 
         let (expansion, description) = expansion!($precomposition);
 
         encoded!(
-            $marker,
+            MARKER_EXPANSION | n_len,
             $fast,
-            ($combining << 32) | (e_index << 16) | (e_len << 8) | (n_len << 4),
+            (e_index << 16) | (e_len << 8),
             Some(expansion); $stats, $codepoint, description
         )
     }};
@@ -243,16 +229,16 @@ macro_rules! expansion_entry {
 
 /// стартер, нет декомпозиции, не комбинируется с предыдущим
 ///
-/// qmmm ____  ____ ____    iiii iiii  iiii iiii    ____ ____  ____ ____    ____ ____  ____ ____
+/// qmmm ____  ____ ____    iiii iiii  iiii iiii
 ///
 fn starter(
-    encoder: &EncodeComposition,
+    encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("стартер (комбинируемый/хангыль)");
 
@@ -263,10 +249,9 @@ fn starter(
     );
 
     // Y - если за стартером следует стартер, то кодпоинт не изменится
-    // M - чамо хангыль V / T - нужно попробовать скомбинировать с предыдущим кодпоинтом
-    assert_qc!(qc, 'Y', 'M');
+    assert_qc!(qc, 'M', 'Y');
 
-    let combining = encoder.combination_info(codepoint.code) as u64;
+    let combining = encoder.combination_info(codepoint.code) as u32;
 
     match (combining == 0) && (qc == 'Y') {
         true => Some(EncodedCodepoint {
@@ -279,16 +264,16 @@ fn starter(
 
 /// синглтон
 ///
-/// qmmm ____  ____ ____    iiii iiii  iiii iiii    xxxx xxxx  xxxx xxxx    xx__ ____  ____ ____
+/// qmmm ____    xxxx xxxx    xxxx xxxx  xx__  ____ ____
 ///
 fn singleton(
-    encoder: &EncodeComposition,
+    _encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("синглтон");
 
@@ -297,27 +282,25 @@ fn singleton(
     // N - синглтон - это всегда замена одного кодпоинта другим
     assert_qc!(qc, 'N');
 
-    let c0 = precomposition[0].code as u64;
-    let combining = encoder.combination_info(c0) as u64;
+    let c0 = precomposition[0].code as u32;
 
-    assert_ne!(codepoint.code as u64, c0);
     assert_not_combines_backwards!(c0);
 
-    encoded!(MARKER_SINGLETON, qc, (combining << 16) | (c0 << 32), None; se, codepoint)
+    encoded!(MARKER_SINGLETON, qc, (c0 << 8), None; se, codepoint)
 }
 
 /// нестартер без декомпозиции
 ///
-/// qmmm ____  cccc cccc    ____ ____  ____ ____    ____ ____  ____ ____    ____ ____  ____ ____
+/// qmmm ____  cccc cccc    ____ ____  ____ ____
 ///
 fn nonstarter(
-    _encoder: &EncodeComposition,
+    _encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("нестартер");
 
@@ -335,23 +318,27 @@ fn nonstarter(
 
 /// пара стартер + нестартер
 ///
-/// qmmm cccc  cccc xxxx    xxxx xxxx  xxxx xxyy    yyyy yyyy  yyyy yyyy    iiii iiii  iiii iiii
+/// qxxxx xxxx  xxxx xxx    yyyy yyyy  yyyy yyyy
 ///
 fn starter_nonstarter_pair(
-    encoder: &EncodeComposition,
+    _encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("пара стартер + нестартер");
 
-    // пара: стартер + нестартер, не является исключением композиции
+    // пара: стартер + нестартер, не является исключением композиции,
+    // оба кодпоинта - 16 бит, первый байт стартера > 0b_1011 (максимальное значение маркера)
 
     blocking_checks!(
         starters_map(precomposition) != "sn",
+        precomposition.iter().any(|c| c.code > 0xFFFF),
+        precomposition[0].code > 0x7FFF,
+        precomposition[0].code as u8 & !0b111 == 0,
         is_exclusion(codepoint.code)
     );
 
@@ -359,29 +346,37 @@ fn starter_nonstarter_pair(
     // N - при комбинировании будет получен другой символ
     assert_qc!(qc, 'Y', 'N');
 
-    let c0 = precomposition[0].code as u64;
-    let c1 = precomposition[1].code as u64;
-    let c1_ccc = precomposition[1].ccc.compressed() as u64;
-
-    let combining = encoder.combination_info(c0) as u64;
+    let c0 = precomposition[0].code;
+    let c1 = precomposition[1].code;
 
     assert_not_combines_backwards!(c0);
 
-    encoded!(MARKER_PAIR, qc, (c1_ccc << 4) | (c0 << 12) | (c1 << 30) | (combining << 48), None; se, codepoint)
+    se.inc(codepoint.code, &codepoint.name);
+
+    let qc = match qc {
+        'Y' => 0,
+        'N' => 1,
+        _ => unreachable!(),
+    };
+
+    Some(EncodedCodepoint {
+        value: qc | (c0 << 1) | (c1 << 16),
+        extra: None,
+    })
 }
 
 /// стартер и последовательность нестартеров
 ///
-/// qmmm tttt  nnnn nnnn    pppp pppp  pppp pppp    iiii iiii  iiii iiii    ____ ____  ____ ____
+/// qmmm ____  nnnn nnnn    pppp pppp  pppp pppp
 ///
 fn starter_nonstarters_sequence(
-    encoder: &EncodeComposition,
+    _encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("стартер + нестартеры");
 
@@ -394,24 +389,21 @@ fn starter_nonstarters_sequence(
     // Y, N - аналогично паре
     assert_qc!(qc, 'Y', 'N');
 
-    let c0 = precomposition[0].code;
-    let combining = encoder.combination_info(c0) as u64;
-
-    expansion_entry!(MARKER_EXPANSION_STARTER_NONSTARTERS, qc, combining, &precomposition, exp_position; se, codepoint)
+    expansion_entry!(qc, &precomposition, exp_position; se, codepoint)
 }
 
 /// последовательность стартеров
 ///
-/// qmmm 0000  nnnn nnnn    pppp pppp  pppp pppp    iiii iiii  iiii iiii    ____ ____  ____ ____
+/// qmmm ____  nnnn nnnn    pppp pppp  pppp pppp
 ///
 fn starters_sequence(
-    encoder: &EncodeComposition,
+    _encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("последовательность стартеров");
 
@@ -423,50 +415,44 @@ fn starters_sequence(
     // N - декомпозиция происходит всегда
     assert_qc!(qc, 'N');
 
-    let clast = precomposition.last().unwrap().code;
-    let combining = encoder.combination_info(clast) as u64;
-
-    expansion_entry!(MARKER_EXPANSION_STARTERS, qc, combining, &precomposition, exp_position; se, codepoint)
+    expansion_entry!(qc, &precomposition, exp_position; se, codepoint)
 }
 
 /// стартер + стартер + нестартер
 ///
-/// qmmm tttt  nnnn nnnn    pppp pppp  pppp pppp    iiii iiii  iiii iiii    ____ ____  ____ ____
+/// qmmm ____  nnnn nnnn    pppp pppp  pppp pppp
 ///
 fn two_starters_nonstarter(
-    encoder: &EncodeComposition,
+    _encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("два стартера + нестартер");
 
     blocking_checks!(starters_map(precomposition) != "ssn");
 
-    // N - только в NFKC - декомпозиция происходит всегда
+    // N - декомпозиция происходит всегда
     assert_qc!(qc, 'N');
 
-    let c1 = precomposition[1].code;
-    let combining = encoder.combination_info(c1) as u64;
-
-    expansion_entry!(MARKER_EXPANSION_TWO_STARTERS_NONSTARTER, qc, combining, &precomposition, exp_position; se, codepoint)
+    expansion_entry!(qc, &precomposition, exp_position; se, codepoint)
 }
 
 /// исключение - стартеры с декомпозицией в нестартеры
 ///
-/// qmmm tttt  nnnn nnnn    pppp pppp  pppp pppp    iiii iiii  iiii iiii    ____ ____  ____ ____
+/// qmmm ____  nnnn nnnn    pppp pppp  pppp pppp
 ///
 fn starters_to_nonstarters(
-    _encoder: &EncodeComposition,
+    _encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
     exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("декомпозиция в нестартеры");
 
@@ -478,21 +464,21 @@ fn starters_to_nonstarters(
     // N - т.к. кодпоинт всегда декомпозируется и не собирается обратно
     assert_qc!(qc, 'N');
 
-    expansion_entry!(MARKER_NONSTARTERS_EXCLUSION, qc, 0, &precomposition, exp_position; se, codepoint)
+    expansion_entry!(qc, &precomposition, exp_position; se, codepoint)
 }
 
 /// исключение - стартеры, комбинируемые с предыдущим кодпоинтом
 ///
-/// qmmm ____  ____ ____    ____ ____  ____ ____    iiii iiii  iiii iiii    ____ ____  ____ ____
+/// qmmm ____  ____ ____    iiii iiii  iiii iiii
 ///
 fn combines_backwards_case(
-    encoder: &EncodeComposition,
+    encoder: &EncodeComposition32,
     codepoint: &Codepoint,
     precomposition: &Vec<Codepoint>,
     qc: char,
-    exp_position: usize,
+    _exp_position: usize,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u64, u32>>
+) -> Option<EncodedCodepoint<u32, u32>>
 {
     let se = stats.touch("комбинируется с предыдущим");
 
@@ -507,9 +493,9 @@ fn combines_backwards_case(
     // M - может быть скомбинирован с предыдущим или оставлен как есть
     assert_qc!(qc, 'M');
 
-    let combines = encoder.combination_backwards_info(codepoint.code) as u64;
+    let combines = encoder.combination_backwards_info(codepoint.code) as u32;
 
-    expansion_entry!(MARKER_COMBINES_BACKWARDS, qc, combines, &precomposition, exp_position; se, codepoint)
+    encoded!(MARKER_COMBINES_BACKWARDS, qc, combines << 16, None; se, codepoint)
 }
 
 /// кодпоинт может быть скомбинирован с предыдущим
