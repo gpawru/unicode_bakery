@@ -1,5 +1,5 @@
 use crate::encode::decomposing::u32::MARKER_HANGUL as MARKER_HANGUL_32;
-use crate::encode::decomposing::MARKER_HANGUL as MARKER_HANGUL_64;
+use crate::encode::decomposing::u64::MARKER_HANGUL as MARKER_HANGUL_64;
 use crate::encode::PatchTables;
 use crate::tables::NormalizationTables;
 
