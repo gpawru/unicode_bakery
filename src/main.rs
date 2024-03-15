@@ -30,16 +30,8 @@ fn main()
 
     write_compositions("CompositionData", "./data/compositions.txt", &compositions);
 
-    write_expansions(
-        "ExpansionsPatch",
-        "./data/nfc.txt",
-        &nfc_expansions,
-    );
-    write_expansions(
-        "ExpansionsPatch",
-        "./data/nfkc.txt",
-        &nfkc_expansions,
-    );
+    write_expansions("ExpansionsPatch", "./data/nfc.txt", &nfc_expansions);
+    write_expansions("ExpansionsPatch", "./data/nfkc.txt", &nfkc_expansions);
 
     write_normalization_stats("./data_stats/nfd.txt", &nfd.stats);
     write_normalization_stats("./data_stats/nfkd.txt", &nfkd.stats);

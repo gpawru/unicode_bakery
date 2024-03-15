@@ -174,9 +174,9 @@ impl EncodeCodepoint<u32, u32> for EncodeNormalization
 //
 // ccс. - (8 бит) - ССС нестартера в записи
 //
-// pp.. - (12 бит) - индекс последовательности кодпоинтов в таблице expansions
-// ll.. - (6 бит) - количество кодпоинтов в последовательности в таблице expansions
-// ss.. - (6 бит) - позиция последнего стартера
+// pp.. - (14 бит) - индекс последовательности кодпоинтов в таблице expansions
+// ll.. - (5 бит) - количество кодпоинтов в последовательности в таблице expansions
+// ss.. - (5 бит) - позиция последнего стартера
 
 macro_rules! blocking_checks {
     ($($expr: expr),+) => {
@@ -377,7 +377,7 @@ fn starter_nonstarter_pair(
 
 /// стартер и последовательность нестартеров
 ///
-/// qmmm ____  ssss ssnn    nnnn pppp  pppp pppp
+/// qmmm ____  ssss snnn    nnpp pppp  pppp pppp
 ///
 fn starter_nonstarters_sequence(
     encoder: &EncodeNormalization,
@@ -412,7 +412,7 @@ fn starter_nonstarters_sequence(
 
 /// последовательность стартеров
 ///
-/// qmmm ____  ssss ssnn    nnnn pppp  pppp pppp
+/// qmmm ____  ssss snnn    nnpp pppp  pppp pppp
 ///
 fn starters_sequence(
     encoder: &EncodeNormalization,
@@ -452,7 +452,7 @@ fn starters_sequence(
 
 /// стартер + стартер + нестартер
 ///
-/// qmmm ____  ssss ssnn    nnnn pppp  pppp pppp
+/// qmmm ____  ssss snnn    nnpp pppp  pppp pppp
 ///
 fn two_starters_nonstarter(
     encoder: &EncodeNormalization,
@@ -483,7 +483,7 @@ fn two_starters_nonstarter(
 
 /// исключение - стартеры с декомпозицией в нестартеры
 ///
-/// qmmm ____  ssss ssnn    nnnn pppp  pppp pppp
+/// qmmm ____  ssss snnn    nnpp pppp  pppp pppp
 ///
 fn starters_to_nonstarters(
     encoder: &EncodeNormalization,
@@ -518,7 +518,7 @@ fn starters_to_nonstarters(
 
 /// прочие декомпозиции
 ///
-/// qmmm ____  ssss ssnn    nnnn pppp  pppp pppp
+/// qmmm ____  ssss snnn    nnpp pppp  pppp pppp
 ///
 fn other_expansions(
     encoder: &EncodeNormalization,
@@ -624,7 +624,7 @@ fn expansion_entry(
     e_composed: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStatsBlock,
     codepoint: &Codepoint,
-    _encoder: &EncodeNormalization,
+    encoder: &EncodeNormalization,
 ) -> Option<EncodedCodepoint<u32, u32>>
 {
     let mut marker = MARKER_EXPANSION;
@@ -649,13 +649,12 @@ fn expansion_entry(
             marker = match exp.len() {
                 0 => {
                     assert_eq!(qc, 0);
+
+                    expansion.insert(0, encoder.combination_info(codepoint.code) as u32);
+
                     MARKER_EXPANSION_COMBINED_EMPTY
-                },
+                }
                 _ => {
-                    let info = bake_expansions_info(pos as u32, &precomposition);
-
-                    expansion.insert(0, info);
-
                     description.push_str(" -> ");
 
                     precomposition.iter().for_each(|codepoint| {
@@ -672,6 +671,33 @@ fn expansion_entry(
                         description
                     );
 
+                    let expansions_info = bake_expansions_info(pos as u32, &precomposition);
+
+                    let last_starter = expansions_info & 0x1F;
+                    let count = (expansions_info >> 5) & 0x1F;
+                    let index = expansions_info >> 10;
+
+                    let composition_info = match count == 0 {
+                        true => encoder.combination_info(codepoint.code) as u32,
+                        false => {
+                            let last_starter = &precomposition[(last_starter) as usize];
+                            encoder.combination_info(last_starter.code) as u32
+                        }
+                    };
+
+                    // перезапечём информацию о расширении в патче как 3 - 3 - 10
+
+                    assert!(last_starter <= 0x7);
+                    assert!(count <= 0x7);
+                    assert!(index <= 0x3FF);
+
+                    let expansions_info = last_starter | (count << 3) | (index << 6);
+
+                    assert!(expansions_info <= 0xFFFF);
+                    assert!(composition_info <= 0xFFFF);
+
+                    expansion.insert(0, expansions_info | (composition_info << 16));
+
                     MARKER_EXPANSION_COMBINED_PATCH
                 }
             };
@@ -685,6 +711,10 @@ fn expansion_entry(
                 description
             );
         }
+    }
+
+    if marker == MARKER_EXPANSION || marker == MARKER_EXPANSION_COMBINED_PATCH {
+        assert_eq!(encoder.combination_info(codepoint.code), 0);
     }
 
     encoded(
@@ -744,7 +774,7 @@ fn bake_expansions_info(index: u32, expansion: &Vec<Codepoint>) -> u32
 
     assert!(last_starter <= 0x1F);
     assert!(expansion.len() <= 0x1F);
-    assert!(index <= 0xFFF);
+    assert!(index <= 0x1FFF);
 
-    last_starter as u32 | ((expansion.len() as u32) << 6) | (index << 12)
+    last_starter as u32 | ((expansion.len() as u32) << 5) | (index << 10)
 }
