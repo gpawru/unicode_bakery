@@ -1,149 +1,250 @@
 use unicode_data::UNICODE;
 
-use crate::{
-    encode::{EncodeCodepoint, EncodedCodepoint, PatchTables},
-    filter::CodepointFilter,
-    stats::EncodeCodepointStats,
-};
+use crate::encode::EncodeCodepoint;
+use crate::stats::EncodeCodepointStats;
 
 /// последний кодпоинт таблицы с декомпозицией
 pub const LAST_DECOMPOSITION_CODE: u32 = 0x2FA1D;
 
 /// таблицы запечённых данных нормализации
-pub struct NormalizationTables<'a, T, E>
+pub struct NormalizationTables<'a>
 {
-    pub index: Vec<u32>,
-    pub data: Vec<T>,
-    pub expansions: Vec<E>,
-    pub block_size: u32,
+    pub index: Vec<u16>,
+    pub data: Vec<u32>,
+    pub expansions: Vec<u32>,
+    pub bits_total: u8,
+    pub bits_big_block: u8,
+    pub bits_small_block: u8,
     pub continuous_block_end: u32,
     pub stats: EncodeCodepointStats,
-    encoder: &'a dyn EncodeCodepoint<T, E>,
-    filters: Option<&'a [&'a dyn CodepointFilter]>,
+    encoder: &'a dyn EncodeCodepoint<u32, u32>,
 }
 
-impl<'a, T, E> NormalizationTables<'a, T, E>
-where
-    T: Copy,
-    E: Copy,
+impl<'a> NormalizationTables<'a>
 {
     /// создать таблицы для нормализации
     pub fn build(
-        block_size: u32,
+        bits_big_block: u8,
+        bits_small_block: u8,
         continuous_block_end: u32,
-        encoder: &'a dyn EncodeCodepoint<T, E>,
-        patches: Option<&'a [&'a dyn PatchTables<T, E>]>,
-        filters: Option<&'a [&'a dyn CodepointFilter]>,
+        encoder: &'a dyn EncodeCodepoint<u32, u32>,
     ) -> Self
     {
-        assert!(block_size.is_power_of_two());
-
         let mut tables = Self {
             index: vec![],
             data: vec![],
             expansions: vec![],
-            block_size,
+            bits_total: 18,
+            bits_big_block,
+            bits_small_block,
             continuous_block_end,
             stats: EncodeCodepointStats::new(),
             encoder,
-            filters,
         };
 
         tables.compose();
 
-        if let Some(patches) = patches {
-            patches.iter().for_each(|p| p.patch(&mut tables));
-        }
-
         tables
+    }
+
+    /// размер данных
+    pub fn size(&self) -> usize
+    {
+        self.index.len() * 2 + self.data.len() * 4 + self.expansions.len() * 4
     }
 
     /// заполнение таблиц
     fn compose(&mut self)
     {
-        let last_block = LAST_DECOMPOSITION_CODE / self.block_size;
+        macro_rules! encode {
+            ($codepoint:expr) => {
+                match self
+                    .encoder
+                    .encode($codepoint, self.expansions.len(), &mut self.stats)
+                {
+                    Some(encoded) => {
+                        if let Some(extra) = encoded.extra {
+                            self.expansions.extend(extra);
+                        }
+                        encoded.value
+                    }
+                    None => 0,
+                }
+            };
+        }
 
-        for block_index in 0 ..= last_block {
-            let block = self.compose_block(block_index, self.expansions.len());
+        let bb_size = self.big_block_size();
+        let bb_count = self.big_block_count();
+        let sb_count = self.small_blocks_in_big();
 
-            if block.iter().all(|e| e.is_none())
-                && (block_index > (self.continuous_block_end / self.block_size))
-            {
-                self.index.push(u32::MAX);
-                continue;
-            }
+        // место под индексы больших блоков
 
-            self.index.push(self.data.len() as u32 / self.block_size);
+        self.index
+            .extend(vec![0; self.primary_index_len() as usize]);
 
-            block.iter().for_each(|entry| {
-                let entry = match entry {
-                    Some(entry) => entry,
-                    None => self.encoder.default(),
+        // заполняем
+
+        let mut big_block = vec![];
+        let mut small_block = vec![];
+
+        for code in 0 .. bb_count * bb_size {
+            small_block.push(match UNICODE.get(&code) {
+                Some(codepoint) => encode!(codepoint),
+                None => 0,
+            });
+
+            if small_block.len() as u32 == self.small_block_size() {
+                let small_block_index = match self.find_small_block(&small_block) {
+                    Some(index) => index,
+                    None => {
+                        let index = self.data.len() as u32;
+                        self.data.append(&mut small_block);
+                        index
+                    }
                 };
 
-                self.data.push(entry.value);
+                small_block.clear();
+                big_block.push(small_block_index as u16);
 
-                if let Some(expansions) = &entry.extra {
-                    expansions.iter().for_each(|&e| self.expansions.push(e))
+                if big_block.len() as u32 == sb_count {
+                    let existing_big_block = match code <= self.continuous_block_end {
+                        true => None,
+                        false => self.find_big_block(&big_block),
+                    };
+
+                    let index = match existing_big_block {
+                        Some(index) => index,
+                        None => {
+                            let index = self.index.len() as u16;
+                            self.index.append(&mut big_block);
+
+                            index
+                        }
+                    };
+
+                    big_block.clear();
+
+                    let current_block = (code / bb_size) as usize;
+
+                    self.index[current_block] = index;
                 }
-            });
+            }
         }
     }
 
-    /// запечь блок кодпоинтов
-    fn compose_block(
-        &mut self,
-        index: u32,
-        exp_position: usize,
-    ) -> Vec<Option<EncodedCodepoint<T, E>>>
+    /// найти полностью совпадающий существующий большой блок (возвращает индекс, если блок найден)
+    fn find_big_block(&self, find: &Vec<u16>) -> Option<u16>
     {
-        let base = index * self.block_size;
-        let mut exp_position = exp_position;
+        let sb_count = self.small_blocks_in_big();
+        let primary_sb = (self.primary_index_len() / sb_count) as usize;
 
-        let block = (0 .. self.block_size)
-            .map(|offset| match &UNICODE.get(&((base + offset) as u32)) {
-                Some(codepoint) => {
-                    if let Some(filters) = &self.filters {
-                        if !filters.iter().all(|f| f.filter(codepoint)) {
-                            return None;
-                        }
-                    }
+        let blocks = self.index.len() / sb_count as usize;
 
-                    match self
-                        .encoder
-                        .encode(codepoint, exp_position, &mut self.stats)
-                    {
-                        Some(encoded) => {
-                            if let Some(extra) = &encoded.extra {
-                                exp_position += extra.len();
-                            }
+        for block in primary_sb .. blocks {
+            let start = block * sb_count as usize;
+            let end = (block + 1) * sb_count as usize - 1;
 
-                            Some(encoded)
-                        }
-                        None => None,
-                    }
-                }
-                None => None,
-            })
-            .collect();
+            let left = &self.index[start ..= end];
+            let right = find.as_slice();
 
-        block
+            if left == right {
+                return Some(block as u16 * sb_count as u16);
+            }
+        }
+
+        None
     }
 
-    /// размер данных. тип индекса при запекании не задаётся, поэтому предполагается
-    // исходя из максимального значения
-    pub fn size(&self) -> usize
+    /// найти полностью совпадающий существующий блок
+    fn find_small_block(&self, find: &Vec<u32>) -> Option<u32>
     {
-        let max_index = *self.index.iter().max().unwrap_or(&0);
+        assert_eq!(find.len() as u32, self.small_block_size());
 
-        let index_size = match max_index {
-            ..= 0xFF => 1,
-            ..= 0xFFFF => 2,
-            _ => 4,
-        };
+        let blocks = self.data.len() as u32 / self.small_block_size();
 
-        self.index.len() * index_size
-            + self.data.len() * core::mem::size_of::<T>()
-            + self.expansions.len() * core::mem::size_of::<E>()
+        for block in 0 .. blocks {
+            let start = (block * self.small_block_size()) as usize;
+            let end = ((block + 1) * self.small_block_size() - 1) as usize;
+
+            let left = &self.data[start ..= end];
+            let right = find.as_slice();
+
+            if left == right {
+                return Some(block * self.small_block_size());
+            }
+        }
+
+        None
+    }
+
+    /// размер первичного индекса
+    fn primary_index_len(&self) -> u32
+    {
+        let bb_count = self.big_block_count();
+        let sb_count = self.small_blocks_in_big();
+
+        bb_count + (sb_count - bb_count % sb_count) % sb_count
+    }
+
+    /// кол-во кодпоинтов в большом блоке
+    fn big_block_size(&self) -> u32
+    {
+        1 << (self.bits_total - self.bits_big_block)
+    }
+
+    /// количество больших блоков, необходимых для таблицы
+    fn big_block_count(&self) -> u32
+    {
+        (LAST_DECOMPOSITION_CODE + self.big_block_size() - 1) / self.big_block_size()
+    }
+
+    /// количество кодпоинтов в маленьком блоке
+    fn small_block_size(&self) -> u32
+    {
+        1 << self.bits_small_block
+    }
+
+    /// количество маленьких блоков в большом блоке
+    fn small_blocks_in_big(&self) -> u32
+    {
+        self.big_block_size() / self.small_block_size()
+    }
+
+    /// количество больших блоков, занимаемых непрерывным стартовым блоком
+    fn continuous_big_blocks_count(&self) -> u32
+    {
+        (self.continuous_block_end + self.big_block_size() - 1) / self.big_block_size()
+    }
+}
+
+impl core::fmt::Debug for NormalizationTables<'_>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        writeln!(f, "{{")?;
+
+        writeln!(
+            f,
+            "  big block size: {}, count: {}",
+            self.big_block_size(),
+            self.big_block_count()
+        )?;
+
+        writeln!(
+            f,
+            "  small block size: {}, in block: {}",
+            self.small_block_size(),
+            self.small_blocks_in_big()
+        )?;
+
+        writeln!(
+            f,
+            "  continuous big blocks: {}",
+            self.continuous_big_blocks_count()
+        )?;
+
+        writeln!(f, "}}")?;
+
+        Ok(())
     }
 }

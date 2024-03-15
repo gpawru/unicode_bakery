@@ -1,27 +1,24 @@
-use std::fmt::UpperHex;
 use std::fs::File;
 use std::io::Write;
 
-use unicode_data::UNICODE;
-
+use crate::encode::normalization::composed_expansions::ComposedExpansions;
+use crate::encode::normalization::compositions::BakedCompositions;
 use crate::stats::EncodeCodepointStats;
 use crate::tables::NormalizationTables;
-pub use format::format_num_vec;
 
-mod format;
+use format::format_num_vec;
+
+pub mod format;
 
 /// длина строки в файле с подготовленными данными
 pub const FORMAT_STRING_LENGTH: usize = 120;
 
-/// записать таблицы нормализации
-pub fn write_normalization_tables<T, E>(
-    table_type: impl AsRef<str>,
+/// записать таблицы
+pub fn write_normalization(
+    classname: impl AsRef<str>,
     filename: impl AsRef<str>,
-    tables: &NormalizationTables<T, E>,
-    extra: impl AsRef<str>,
-) where
-    T: UpperHex + Into<u64> + Copy,
-    E: UpperHex + Into<u64> + Copy,
+    tables: &NormalizationTables,
+)
 {
     let mut file = File::create(filename.as_ref()).unwrap();
 
@@ -29,15 +26,54 @@ pub fn write_normalization_tables<T, E>(
         "{} {{\n  \
             index: &[{}  ],\n  \
             data: &[{}  ],\n  \
-            expansions: &[{}  ],\n  {}\
+            expansions: &[{}  ],\n  \
             continuous_block_end: 0x{:04X},\n\
         }}\n",
-        table_type.as_ref(),
+        classname.as_ref(),
         format_num_vec(tables.index.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.data.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.expansions.as_slice(), FORMAT_STRING_LENGTH),
-        extra.as_ref(),
         tables.continuous_block_end,
+    );
+
+    write!(file, "{}", output).unwrap();
+}
+
+/// записать композиции
+pub fn write_compositions(
+    classname: impl AsRef<str>,
+    filename: impl AsRef<str>,
+    compositions: &BakedCompositions,
+)
+{
+    let mut file = File::create(filename.as_ref()).unwrap();
+
+    let output = format!(
+        "{} {{\n  \
+            compositions: &[{}  ],\n\
+        }}\n",
+        classname.as_ref(),
+        format_num_vec(compositions.table.as_slice(), FORMAT_STRING_LENGTH),
+    );
+
+    write!(file, "{}", output).unwrap();
+}
+
+/// записать корректировки декомпозиций для NFC / NFKC
+pub fn write_expansions(
+    classname: impl AsRef<str>,
+    filename: impl AsRef<str>,
+    compositions: &ComposedExpansions,
+)
+{
+    let mut file = File::create(filename.as_ref()).unwrap();
+
+    let output = format!(
+        "{} {{\n  \
+            expansions: &[{}  ],\n\
+        }}\n",
+        classname.as_ref(),
+        format_num_vec(compositions.values.as_slice(), FORMAT_STRING_LENGTH),
     );
 
     write!(file, "{}", output).unwrap();
@@ -69,64 +105,4 @@ pub fn write_normalization_stats(filename: impl AsRef<str>, stats: &EncodeCodepo
 
             writeln!(file).unwrap();
         });
-}
-
-/// записать кодпоинты блоков таблицы норализации
-pub fn write_normalization_blocks<T, E>(
-    filename: impl AsRef<str>,
-    tables: &NormalizationTables<T, E>,
-) where
-    T: Into<u64> + Copy,
-{
-    let mut file = File::create(filename.as_ref()).unwrap();
-
-    let empty_block_index = *tables
-        .index
-        .iter()
-        .find(|&&b| {
-            tables.data[(b * tables.block_size) as usize .. ((b + 1) * tables.block_size) as usize]
-                .iter()
-                .all(|&e| e.into() == 0)
-        })
-        .unwrap();
-
-    tables
-        .index
-        .iter()
-        .enumerate()
-        .for_each(|(index, &data_index)| {
-            if data_index == empty_block_index {
-                return;
-            }
-
-            let start = data_index * tables.block_size;
-            let end = (data_index + 1) * tables.block_size;
-
-            if tables.data[start as usize .. end as usize]
-                .iter()
-                .all(|&e| e.into() == 0)
-            {
-                assert!(end - 1 <= tables.continuous_block_end);
-                return;
-            }
-
-            writeln!(file, "#{} -> 0x{:02X}\n", index, data_index).unwrap();
-
-            for offset in 0 .. tables.block_size {
-                if tables.data[(start + offset) as usize].into() == 0 {
-                    continue;
-                }
-
-                let code = (index as u32) * tables.block_size + offset as u32;
-
-                match UNICODE.get(&code) {
-                    Some(codepoint) => {
-                        writeln!(file, "U+{:04X} - {}", codepoint.code, codepoint.name).unwrap()
-                    }
-                    None => writeln!(file, "U+{:04X}", code).unwrap(),
-                };
-            }
-
-            writeln!(file).unwrap();
-        })
 }

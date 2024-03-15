@@ -2,5 +2,8 @@
 .vscode/
 target/
 
+data/*.txt
+data_stats/*.txt
+
 Cargo.lock
 .DS_Store

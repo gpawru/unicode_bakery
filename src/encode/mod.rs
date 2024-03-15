@@ -1,9 +1,8 @@
 use unicode_data::codepoint::Codepoint;
 
-use crate::{stats::EncodeCodepointStats, tables::NormalizationTables};
+use crate::stats::EncodeCodepointStats;
 
-pub mod composing;
-pub mod decomposing;
+pub mod normalization;
 
 /// закодированный кодпоинт
 #[derive(Debug, Clone)]
@@ -27,10 +26,4 @@ pub trait EncodeCodepoint<T, E>
 
     /// значение по умолчанию для пропускаемых элементов
     fn default(&self) -> &EncodedCodepoint<T, E>;
-}
-
-pub trait PatchTables<T, E>
-{
-    /// применить патч к сформированной таблице кодпоинтов
-    fn patch(&self, tables: &mut NormalizationTables<T, E>);
 }

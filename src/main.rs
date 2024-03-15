@@ -1,59 +1,52 @@
-use encode::decomposing::patches::default::DefaultPatch;
-use encode::decomposing::patches::hangul::HangulPatch;
+#[macro_use]
+extern crate lazy_static;
+
+use encode::normalization::compositions::BakedCompositions;
+use encode::normalization::EncodeNormalization;
 use output::*;
 use tables::NormalizationTables;
 
-use encode::composing::u32::EncodeComposition32;
-use encode::decomposing::u32::EncodeDecomposition32;
+use crate::encode::normalization::composed_expansions::ComposedExpansions;
 
-mod common;
 mod encode;
-mod filter;
 mod output;
 mod stats;
 mod tables;
 
 fn main()
 {
-    // NFD
-    decomposition_tables!(
-        "nfd.u32",
-        EncodeDecomposition32,
-        128,
-        0xFFF,
-        true,
-        Some(&[&DefaultPatch, &HangulPatch]),
-        None
+    let nfd_encoder = EncodeNormalization::new(true);
+    let nfd = NormalizationTables::build(11, 3, 0xFFF, &nfd_encoder);
+
+    let nfkd_encoder = EncodeNormalization::new(false);
+    let nfkd = NormalizationTables::build(11, 3, 0xFFF, &nfkd_encoder);
+
+    let compositions = BakedCompositions::new();
+    let nfc_expansions = ComposedExpansions::new(true);
+    let nfkc_expansions = ComposedExpansions::new(false);
+
+    write_normalization("DecompositionData", "./data/nfd.txt", &nfd);
+    write_normalization("DecompositionData", "./data/nfkd.txt", &nfkd);
+
+    write_compositions("CompositionData", "./data/compositions.txt", &compositions);
+
+    write_expansions(
+        "ExpansionsPatch",
+        "./data/nfc.txt",
+        &nfc_expansions,
+    );
+    write_expansions(
+        "ExpansionsPatch",
+        "./data/nfkc.txt",
+        &nfkc_expansions,
     );
 
-    // NFKD
-    decomposition_tables!(
-        "nfkd.u32",
-        EncodeDecomposition32,
-        128,
-        0xFFF,
-        false,
-        Some(&[&DefaultPatch, &HangulPatch]),
-        None
-    );
+    write_normalization_stats("./data_stats/nfd.txt", &nfd.stats);
+    write_normalization_stats("./data_stats/nfkd.txt", &nfkd.stats);
 
-    // NFC
-    composition_tables!(
-        "nfc.u32",
-        EncodeComposition32::new(true),
-        128,
-        0xFFF,
-        Some(&[&DefaultPatch]),
-        None
-    );
-
-    // // NFKC
-    composition_tables!(
-        "nfkc.u32",
-        EncodeComposition32::new(false),
-        128,
-        0xFFF,
-        Some(&[&DefaultPatch]),
-        None
-    );
+    println!("NFD: {} Kb", nfd.size() / 1024);
+    println!("NFKD: {} Kb", nfkd.size() / 1024);
+    println!("Compositions: {} Kb", compositions.size() / 1024);
+    println!("NFC expansions: {} b", nfc_expansions.size());
+    println!("NFKC expansions: {} b", nfkc_expansions.size());
 }

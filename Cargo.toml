@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 unicode_data = { git = "https://github.com/gpawru/unicode_data.git" }
+lazy_static = "1.4.0"
