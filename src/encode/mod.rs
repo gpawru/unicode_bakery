@@ -1,29 +1,42 @@
+use crate::stats::EncodeCodepointStats;
 use unicode_data::codepoint::Codepoint;
 
-use crate::stats::EncodeCodepointStats;
-
 pub mod normalization;
+pub mod weights;
 
 /// закодированный кодпоинт
 #[derive(Debug, Clone)]
-pub struct EncodedCodepoint<T, E>
+pub struct EncodedCodepoint<T>
 {
     /// данные
     pub value: T,
-    /// дополнительные данные
-    pub extra: Option<Vec<E>>,
 }
 
-pub trait EncodeCodepoint<T, E>
+impl<T> EncodedCodepoint<T>
+{
+    pub fn new(value: T) -> Self
+    {
+        Self { value }
+    }
+}
+
+impl<T> Default for EncodedCodepoint<T>
+where
+    T: From<u8>,
+{
+    fn default() -> Self
+    {
+        Self { value: T::from(0) }
+    }
+}
+
+pub trait EncodeCodepoint<T, E, X>
 {
     /// закодировать кодпоинт
     fn encode(
         &self,
         codepoint: &Codepoint,
-        exp_position: usize,
+        extra: &mut X,
         stats: &mut EncodeCodepointStats,
-    ) -> Option<EncodedCodepoint<T, E>>;
-
-    /// значение по умолчанию для пропускаемых элементов
-    fn default(&self) -> &EncodedCodepoint<T, E>;
+    ) -> Option<EncodedCodepoint<T>>;
 }

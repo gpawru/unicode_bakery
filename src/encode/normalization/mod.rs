@@ -94,14 +94,14 @@ impl EncodeNormalization
     }
 }
 
-impl EncodeCodepoint<u32, u32> for EncodeNormalization
+impl EncodeCodepoint<u32, u32, Vec<u32>> for EncodeNormalization
 {
     fn encode(
         &self,
         codepoint: &Codepoint,
-        exp_position: usize,
+        extra: &mut Vec<u32>,
         stats: &mut EncodeCodepointStats,
-    ) -> Option<EncodedCodepoint<u32, u32>>
+    ) -> Option<EncodedCodepoint<u32>>
     {
         let qc = get_qc(codepoint.code, self.is_canonical);
 
@@ -124,16 +124,9 @@ impl EncodeCodepoint<u32, u32> for EncodeNormalization
             other_expansions,
         ];
 
-        let value = variants.iter().find_map(|f| {
-            f(
-                &self,
-                codepoint,
-                qc,
-                exp_position,
-                composed_expansion,
-                stats,
-            )
-        });
+        let value = variants
+            .iter()
+            .find_map(|f| f(&self, codepoint, qc, extra, composed_expansion, stats));
 
         if value.is_none() {
             panic!(
@@ -149,14 +142,6 @@ impl EncodeCodepoint<u32, u32> for EncodeNormalization
         match value.value == 0 {
             true => None,
             false => Some(value),
-        }
-    }
-
-    fn default(&self) -> &EncodedCodepoint<u32, u32>
-    {
-        &EncodedCodepoint {
-            value: 0,
-            extra: None,
         }
     }
 }
@@ -194,10 +179,10 @@ fn hangul(
     _encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    _exp_position: usize,
+    _extra: &mut Vec<u32>,
     _composed_expansion: Option<(usize, &[u32])>,
     _stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     // не пишем в статистику, т.к. заранее знаем, что туда попадёт (чамо + слоги)
 
@@ -215,10 +200,7 @@ fn hangul(
         }
     };
 
-    Some(EncodedCodepoint {
-        value: (marker << 1) as u32 | (qc as u32),
-        extra: None,
-    })
+    Some(EncodedCodepoint::new((marker << 1) as u32 | (qc as u32)))
 }
 
 /// стартер, нет декомпозиции, не комбинируется с предыдущим
@@ -229,10 +211,10 @@ fn starter(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    _exp_position: usize,
+    _extra: &mut Vec<u32>,
     _composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("стартер (комбинируемый)");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -249,19 +231,8 @@ fn starter(
     let combining = encoder.combination_info(codepoint.code) as u32;
 
     match combining == 0 {
-        true => Some(EncodedCodepoint {
-            value: 0,
-            extra: None,
-        }),
-        false => encoded(
-            MARKER_STARTER,
-            qc,
-            combining << 16,
-            None,
-            se,
-            codepoint,
-            None,
-        ),
+        true => Some(EncodedCodepoint::default()),
+        false => encoded(MARKER_STARTER, qc, combining << 16, se, codepoint, None),
     }
 }
 
@@ -273,10 +244,10 @@ fn singleton(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    _exp_position: usize,
+    _extra: &mut Vec<u32>,
     _composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("синглтон");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -289,7 +260,7 @@ fn singleton(
     assert_eq!(qc, 1);
     assert!(!combines_backwards(c0));
 
-    encoded(MARKER_SINGLETON, qc, c0 << 8, None, se, codepoint, None)
+    encoded(MARKER_SINGLETON, qc, c0 << 8, se, codepoint, None)
 }
 
 /// нестартер без декомпозиции
@@ -300,10 +271,10 @@ fn nonstarter(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    _exp_position: usize,
+    _extra: &mut Vec<u32>,
     _composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("нестартер");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -315,7 +286,7 @@ fn nonstarter(
 
     let ccc = codepoint.ccc.compressed() as u32;
 
-    encoded(MARKER_NONSTARTER, qc, ccc << 8, None, se, codepoint, None)
+    encoded(MARKER_NONSTARTER, qc, ccc << 8, se, codepoint, None)
 }
 
 /// пара стартер + нестартер
@@ -326,10 +297,10 @@ fn starter_nonstarter_pair(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    _exp_position: usize,
+    _extra: &mut Vec<u32>,
     _composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("пара стартер + нестартер (15/16 бит)");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -350,7 +321,7 @@ fn starter_nonstarter_pair(
 
     assert!(!combines_backwards(c0));
 
-    let encoded = encoded(0, qc, (c0 << 1) | (c1 << 16), None, se, codepoint, None);
+    let encoded = encoded(0, qc, (c0 << 1) | (c1 << 16), se, codepoint, None);
 
     // проверки для отсева пересечения с маркерами
     if let Some(encoded) = &encoded {
@@ -383,10 +354,10 @@ fn starter_nonstarters_sequence(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    exp_position: usize,
+    extra: &mut Vec<u32>,
     composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("стартер + нестартеры");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -402,7 +373,7 @@ fn starter_nonstarters_sequence(
     expansion_entry(
         qc,
         &decomposition,
-        exp_position,
+        extra,
         composed_expansion,
         se,
         codepoint,
@@ -418,10 +389,10 @@ fn starters_sequence(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    exp_position: usize,
+    extra: &mut Vec<u32>,
     composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("последовательность стартеров");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -442,7 +413,7 @@ fn starters_sequence(
     expansion_entry(
         qc,
         &decomposition,
-        exp_position,
+        extra,
         composed_expansion,
         se,
         codepoint,
@@ -458,10 +429,10 @@ fn two_starters_nonstarter(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    exp_position: usize,
+    extra: &mut Vec<u32>,
     composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("два стартера + нестартер");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -473,7 +444,7 @@ fn two_starters_nonstarter(
     expansion_entry(
         qc,
         &decomposition,
-        exp_position,
+        extra,
         composed_expansion,
         se,
         codepoint,
@@ -489,10 +460,10 @@ fn starters_to_nonstarters(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    exp_position: usize,
+    extra: &mut Vec<u32>,
     composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("декомпозиция в нестартеры");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -508,7 +479,7 @@ fn starters_to_nonstarters(
     expansion_entry(
         qc,
         &decomposition,
-        exp_position,
+        extra,
         composed_expansion,
         se,
         codepoint,
@@ -524,10 +495,10 @@ fn other_expansions(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    exp_position: usize,
+    extra: &mut Vec<u32>,
     composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("прочие декомпозиции");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -540,7 +511,7 @@ fn other_expansions(
     expansion_entry(
         qc,
         &decomposition,
-        exp_position,
+        extra,
         composed_expansion,
         se,
         codepoint,
@@ -556,10 +527,10 @@ fn combines_backwards_case(
     encoder: &EncodeNormalization,
     codepoint: &Codepoint,
     qc: u8,
-    _exp_position: usize,
+    _extra: &mut Vec<u32>,
     _composed_expansion: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStats,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let se = stats.touch("комбинируется с предыдущим");
     let decomposition = encoder.decomposition(codepoint.code);
@@ -581,7 +552,6 @@ fn combines_backwards_case(
         MARKER_COMBINES_BACKWARDS,
         qc,
         combines << 16,
-        None,
         se,
         codepoint,
         None,
@@ -595,11 +565,10 @@ fn encoded(
     marker: u8,
     qc: u8,
     value: u32,
-    expansion: Option<Vec<u32>>,
     stats: &mut EncodeCodepointStatsBlock,
     codepoint: &Codepoint,
     description: Option<&str>,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let description = match description {
         None => format!("{}", codepoint.name),
@@ -610,22 +579,19 @@ fn encoded(
 
     let qc = qc as u32;
 
-    Some(EncodedCodepoint {
-        value: ((marker as u32) << 1) | qc | value,
-        extra: expansion,
-    })
+    Some(EncodedCodepoint::new(((marker as u32) << 1) | qc | value))
 }
 
 /// запись с данными во внешнем блоке
 fn expansion_entry(
     qc: u8,
     decomposition: &Vec<Codepoint>,
-    e_index: usize,
+    extra: &mut Vec<u32>,
     e_composed: Option<(usize, &[u32])>,
     stats: &mut EncodeCodepointStatsBlock,
     codepoint: &Codepoint,
     encoder: &EncodeNormalization,
-) -> Option<EncodedCodepoint<u32, u32>>
+) -> Option<EncodedCodepoint<u32>>
 {
     let mut marker = MARKER_EXPANSION;
 
@@ -639,8 +605,7 @@ fn expansion_entry(
 
     let (mut expansion, mut description) = bake_expansions(decomposition);
 
-    let info = bake_expansions_info(e_index as u32, decomposition);
-
+    // декомпозиция отличается от прекомпозиции
     match e_composed {
         Some((pos, exp)) => {
             let precomposition: Vec<Codepoint> =
@@ -717,11 +682,20 @@ fn expansion_entry(
         assert_eq!(encoder.combination_info(codepoint.code), 0);
     }
 
+    // если подобная последовательность уже записана - получим её индекс
+    let position = find_subsequence(extra, &expansion).unwrap_or_else(|| {
+        let position = extra.len();
+        extra.extend(expansion);
+        position
+    });
+
+    // информация - индекс, последний стартер, длина декомпозиции
+    let info = bake_expansions_info(position as u32, decomposition);
+
     encoded(
         marker,
         qc,
         info << 8,
-        Some(expansion),
         stats,
         codepoint,
         Some(description.as_str()),
@@ -777,4 +751,16 @@ fn bake_expansions_info(index: u32, expansion: &Vec<Codepoint>) -> u32
     assert!(index <= 0x1FFF);
 
     last_starter as u32 | ((expansion.len() as u32) << 5) | (index << 10)
+}
+
+/// найти подпоследовательность
+fn find_subsequence(entries: &Vec<u32>, find: &Vec<u32>) -> Option<usize>
+{
+    for (i, window) in entries.windows(find.len()).enumerate() {
+        if window == find {
+            return Some(i);
+        }
+    }
+
+    None
 }

@@ -5,6 +5,7 @@ use crate::encode::normalization::composed_expansions::ComposedExpansions;
 use crate::encode::normalization::compositions::BakedCompositions;
 use crate::stats::EncodeCodepointStats;
 use crate::tables::NormalizationTables;
+use crate::tables::WeightsTables;
 
 use format::format_num_vec;
 
@@ -63,7 +64,7 @@ pub fn write_compositions(
 pub fn write_expansions(
     classname: impl AsRef<str>,
     filename: impl AsRef<str>,
-    compositions: &ComposedExpansions,
+    precomposed_expansions: &ComposedExpansions,
 )
 {
     let mut file = File::create(filename.as_ref()).unwrap();
@@ -73,14 +74,14 @@ pub fn write_expansions(
             expansions: &[{}  ],\n\
         }}\n",
         classname.as_ref(),
-        format_num_vec(compositions.values.as_slice(), FORMAT_STRING_LENGTH),
+        format_num_vec(precomposed_expansions.values.as_slice(), FORMAT_STRING_LENGTH),
     );
 
     write!(file, "{}", output).unwrap();
 }
 
-/// записать статистику таблиц нормализации
-pub fn write_normalization_stats(filename: impl AsRef<str>, stats: &EncodeCodepointStats)
+/// записать статистику по кодпоинтам в таблицах нормализации / таблицах весов
+pub fn write_stats(filename: impl AsRef<str>, stats: &EncodeCodepointStats)
 {
     let mut file = File::create(filename.as_ref()).unwrap();
 
@@ -105,4 +106,26 @@ pub fn write_normalization_stats(filename: impl AsRef<str>, stats: &EncodeCodepo
 
             writeln!(file).unwrap();
         });
+}
+
+/// записать веса
+pub fn write_weights(classname: impl AsRef<str>, filename: impl AsRef<str>, tables: &WeightsTables)
+{
+    let mut file = File::create(filename.as_ref()).unwrap();
+
+    let output = format!(
+        "{} {{\n  \
+            index: &[{}  ],\n  \
+            data: &[{}  ],\n  \
+            weights: &[{}  ],\n  \
+            continuous_block_end: 0x{:04X},\n\
+        }}\n",
+        classname.as_ref(),
+        format_num_vec(tables.index.as_slice(), FORMAT_STRING_LENGTH),
+        format_num_vec(tables.data.as_slice(), FORMAT_STRING_LENGTH),
+        format_num_vec(tables.weights.as_slice(), FORMAT_STRING_LENGTH),
+        tables.continuous_block_end,
+    );
+
+    write!(file, "{}", output).unwrap();
 }

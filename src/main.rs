@@ -7,6 +7,7 @@ use output::*;
 use tables::NormalizationTables;
 
 use crate::encode::normalization::composed_expansions::ComposedExpansions;
+use crate::tables::WeightsTables;
 
 mod encode;
 mod output;
@@ -33,12 +34,19 @@ fn main()
     write_expansions("ExpansionsPatch", "./data/nfc.txt", &nfc_expansions);
     write_expansions("ExpansionsPatch", "./data/nfkc.txt", &nfkc_expansions);
 
-    write_normalization_stats("./data_stats/nfd.txt", &nfd.stats);
-    write_normalization_stats("./data_stats/nfkd.txt", &nfkd.stats);
+    write_stats("./data_stats/nfd.txt", &nfd.stats);
+    write_stats("./data_stats/nfkd.txt", &nfkd.stats);
 
     println!("NFD: {} Kb", nfd.size() / 1024);
     println!("NFKD: {} Kb", nfkd.size() / 1024);
     println!("Compositions: {} Kb", compositions.size() / 1024);
     println!("NFC expansions: {} b", nfc_expansions.size());
     println!("NFKC expansions: {} b", nfkc_expansions.size());
+
+    let cldr_und = WeightsTables::build(11, 3, 0xFFF, true, &unicode_data::CLDR_UND_TRIE);
+
+    write_weights("WeightsData", "./data/cldr_und.txt", &cldr_und);
+    write_stats("./data_stats/cldr_und.txt", &cldr_und.stats);
+
+    println!("CLDR UND: {} Kb", cldr_und.size() / 1024);
 }
