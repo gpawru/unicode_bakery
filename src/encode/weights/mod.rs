@@ -6,7 +6,6 @@ use unicode_data::{TrieNode, Weights, NFD, NFKD, UNICODE};
 use super::{EncodeCodepoint, EncodedCodepoint};
 use crate::encode::weights::implicit::is_implicit;
 use crate::stats::EncodeCodepointStats;
-use crate::tables::NormalizationTables;
 
 pub const MARKER_STARTER_SINGLE_WEIGHTS: u8 = 0b_001;
 pub const MARKER_NONSTARTER_SINGLE_WEIGHTS: u8 = 0b_010;
@@ -97,6 +96,7 @@ impl<'a> EncodeCodepoint<u64, u32, AdditionalInfo<'a>> for EncodeWeights<'a>
     {
         #[rustfmt::skip]
         let variants = &[
+            implicit_weights,
             // одинарные веса
             starter_single_weights,         // стартеры
             singletons,                     // синглтоны
@@ -104,10 +104,10 @@ impl<'a> EncodeCodepoint<u64, u32, AdditionalInfo<'a>> for EncodeWeights<'a>
             // расширения
             expansions,                     // стартеры и не-стартеры без декомпозиции с несколькими весами
             expansions_implicit_singletons, // синглтоны - декомпозиция в стартер с вычисляемыми весами
-            has_decomposition,
-            implicit_weights,
-            hangul_syllables,
-            has_children,
+            // декомпозиция           
+            has_decomposition,              // декомпозиция как: одиночные веса / расширение / обычная
+            hangul_syllables,               // слоги хангыль
+            has_children,                   // последовательности кодпоинтов
         ];
 
         let value = variants

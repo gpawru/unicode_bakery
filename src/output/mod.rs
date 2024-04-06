@@ -98,7 +98,7 @@ pub fn write_stats(filename: impl AsRef<str>, stats: &EncodeCodepointStats)
             writeln!(file, "{}. {} ({})", block.order, header, block.count).unwrap();
         });
 
-    writeln!(file);
+    writeln!(file).unwrap();
 
     headers
         .iter()

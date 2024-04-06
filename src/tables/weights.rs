@@ -4,11 +4,11 @@ use unicode_data::codepoint::*;
 use unicode_data::{TrieNode, UNICODE};
 
 use crate::encode::weights::AdditionalInfo;
-use crate::encode::{normalization::EncodeNormalization, weights::EncodeWeights};
+use crate::encode::weights::EncodeWeights;
 use crate::encode::{EncodeCodepoint, EncodedCodepoint};
 use crate::stats::EncodeCodepointStats;
 
-use super::{NormalizationTables, LAST_DECOMPOSITION_CODE};
+use super::LAST_DECOMPOSITION_CODE;
 
 /// таблицы запечённых данных весов
 pub struct WeightsTables
@@ -57,7 +57,10 @@ impl WeightsTables
     /// размер данных
     pub fn size(&self) -> usize
     {
-        self.index.len() * 2 + self.data.len() * 8 + self.weights.len() * 4 + self.decompositions.len() * 4
+        self.index.len() * 2
+            + self.data.len() * 8
+            + self.weights.len() * 4
+            + self.decompositions.len() * 4
     }
 
     /// позиция записи кодпоинта в data
