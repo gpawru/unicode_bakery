@@ -16,6 +16,7 @@ pub struct WeightsTables
     pub index: Vec<u16>,
     pub data: Vec<u64>,
     pub weights: Vec<u32>,
+    pub decompositions: Vec<u32>,
     pub bits_total: u8,
     pub bits_big_block: u8,
     pub bits_small_block: u8,
@@ -34,21 +35,13 @@ impl WeightsTables
         weights_map: &HashMap<u32, TrieNode>,
     ) -> Self
     {
-        let nfd_encoder = EncodeNormalization::new(true);
-
-        let nfd = NormalizationTables::build(
-            bits_big_block,
-            bits_small_block,
-            continuous_block_end,
-            &nfd_encoder,
-        );
-
-        let encoder = EncodeWeights::new(is_canonical, weights_map, &nfd);
+        let encoder = EncodeWeights::new(is_canonical, weights_map);
 
         let mut tables = Self {
             index: vec![],
             data: vec![],
             weights: vec![],
+            decompositions: vec![],
             bits_total: 18,
             bits_big_block,
             bits_small_block,
@@ -64,7 +57,7 @@ impl WeightsTables
     /// размер данных
     pub fn size(&self) -> usize
     {
-        self.index.len() * 2 + self.data.len() * 8 + self.weights.len() * 4
+        self.index.len() * 2 + self.data.len() * 8 + self.weights.len() * 4 + self.decompositions.len() * 4
     }
 
     /// позиция записи кодпоинта в data
@@ -219,6 +212,7 @@ impl WeightsTables
         let mut extra = AdditionalInfo {
             trie_node: weights_entry,
             weights: &mut self.weights,
+            decompositions: &mut self.decompositions,
         };
 
         encoder.encode(&codepoint, &mut extra, &mut self.stats)

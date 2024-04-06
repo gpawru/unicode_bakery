@@ -74,7 +74,10 @@ pub fn write_expansions(
             expansions: &[{}  ],\n\
         }}\n",
         classname.as_ref(),
-        format_num_vec(precomposed_expansions.values.as_slice(), FORMAT_STRING_LENGTH),
+        format_num_vec(
+            precomposed_expansions.values.as_slice(),
+            FORMAT_STRING_LENGTH
+        ),
     );
 
     write!(file, "{}", output).unwrap();
@@ -87,6 +90,15 @@ pub fn write_stats(filename: impl AsRef<str>, stats: &EncodeCodepointStats)
 
     let mut headers: Vec<&String> = stats.blocks.keys().collect();
     headers.sort_by_key(|k| stats.blocks[*k].order);
+
+    headers
+        .iter()
+        .map(|&k| (k, &stats.blocks[k]))
+        .for_each(|(header, block)| {
+            writeln!(file, "{}. {} ({})", block.order, header, block.count).unwrap();
+        });
+
+    writeln!(file);
 
     headers
         .iter()
@@ -118,12 +130,14 @@ pub fn write_weights(classname: impl AsRef<str>, filename: impl AsRef<str>, tabl
             index: &[{}  ],\n  \
             data: &[{}  ],\n  \
             weights: &[{}  ],\n  \
+            decompositions: &[{}  ],\n  \
             continuous_block_end: 0x{:04X},\n\
         }}\n",
         classname.as_ref(),
         format_num_vec(tables.index.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.data.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.weights.as_slice(), FORMAT_STRING_LENGTH),
+        format_num_vec(tables.decompositions.as_slice(), FORMAT_STRING_LENGTH),
         tables.continuous_block_end,
     );
 
