@@ -314,7 +314,7 @@ fn expansions(
         trie_node.weights.len() == 1    // несколько весов
     );
 
-    let weights = bake_weights_vec(trie_node.weights);
+    let weights = bake_weights_vec(trie_node.weights, false);
     let (len, pos) = bake_extra(&mut extra.weights, &weights);
     let ccc = get_ccc(&codepoint.code).compressed() as u64;
 
@@ -348,7 +348,7 @@ fn expansions_implicit_singletons(
         !is_implicit(decomposition[0].code, true)   // ... с вычисляемыми весами
     );
 
-    let weights = bake_weights_vec(trie_node.weights);
+    let weights = bake_weights_vec(trie_node.weights, false);
     let (len, pos) = bake_extra(&mut extra.weights, &weights);
 
     stats_codepoint!(stats, codepoint, trie_node);
@@ -430,7 +430,7 @@ fn has_decomposition(
 
         let stats = stats.touch("стартер, расширения");
 
-        let weights = bake_weights_vec(trie_node.weights);
+        let weights = bake_weights_vec(trie_node.weights, false);
         let (len, pos) = bake_extra(&mut extra.weights, &weights);
 
         assert!(len <= 0x3F); // 6 бит
@@ -568,7 +568,7 @@ fn bake_trie(code: u32, node: &TrieNode, is_last: bool) -> Vec<u32>
 
     let has_children = node.children_len() != 0;
     let entry = bake_codepoint(code, has_children, is_last, node.weights.len() as u32);
-    let weights = bake_weights_vec(node.weights);
+    let weights = bake_weights_vec(node.weights, false);
 
     data.push(entry);
     data.extend(weights);
@@ -609,13 +609,15 @@ fn trie_total_count(node: &TrieNode) -> usize
 
 /// цепочка весов из их запечённых значений, где присутствует маркер продолжения цепочки
 /// (в незадействованном старшем бите)
-fn bake_weights_vec(weights: &Vec<Weights>) -> Vec<u32>
+fn bake_weights_vec(weights: &Vec<Weights>, use_last_marker: bool) -> Vec<u32>
 {
     let last = weights.len().saturating_sub(1);
+    let use_last_marker = use_last_marker as u32;
+
     weights
         .iter()
         .enumerate()
-        .map(|(i, w)| bake_weights(w) | ((i != last) as u32) << 31)
+        .map(|(i, w)| bake_weights(w) | ((((i != last) as u32) & use_last_marker) << 31))
         .collect()
 }
 
