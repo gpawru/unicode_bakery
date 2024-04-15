@@ -14,7 +14,8 @@ use super::LAST_DECOMPOSITION_CODE;
 pub struct WeightsTables
 {
     pub index: Vec<u16>,
-    pub data: Vec<u64>,
+    pub scalars32: Vec<u32>,
+    pub scalars64: Vec<u64>,
     pub weights: Vec<u32>,
     pub decompositions: Vec<u32>,
     pub bits_total: u8,
@@ -39,7 +40,8 @@ impl WeightsTables
 
         let mut tables = Self {
             index: vec![],
-            data: vec![],
+            scalars32: vec![],
+            scalars64: vec![],
             weights: vec![],
             decompositions: vec![],
             bits_total: 18,
@@ -58,7 +60,8 @@ impl WeightsTables
     pub fn size(&self) -> usize
     {
         self.index.len() * 2
-            + self.data.len() * 8
+            + self.scalars32.len() * 4
+            + self.scalars64.len() * 8
             + self.weights.len() * 4
             + self.decompositions.len() * 4
     }
@@ -117,14 +120,37 @@ impl WeightsTables
             });
 
             if small_block.len() as u32 == self.small_block_size() {
-                let small_block_index = match self.find_small_block(&small_block) {
-                    Some(index) => index,
-                    None => {
-                        let index = self.data.len() as u32;
-                        self.data.append(&mut small_block);
-                        index
-                    }
+                let is_u32 = small_block.iter().all(|e| (e >> 32) == 0);
+
+                let small_block_index = if is_u32 {
+                    let small_block = small_block.iter().map(|&e| e as u32).collect::<Vec<u32>>();
+
+                    let index = match self.find_block(&small_block, &self.scalars32) {
+                        Some(index) => index,
+                        None => {
+                            let index = self.scalars32.len() as u32;
+                            self.scalars32.extend(&small_block);
+                            index
+                        }
+                    };
+
+                    assert!(index < 0x7FFF);
+                    index << 1
+                } else {
+                    let index = match self.find_block(&small_block, &self.scalars64) {
+                        Some(index) => index,
+                        None => {
+                            let index = self.scalars64.len() as u32;
+                            self.scalars64.extend(&small_block);
+                            index
+                        }
+                    };
+
+                    assert!(index < 0x7FFF);
+                    (index << 1) | 1
                 };
+
+                small_block.clear();
 
                 small_block.clear();
                 big_block.push(small_block_index as u16);
@@ -132,11 +158,11 @@ impl WeightsTables
                 if big_block.len() as u32 == sb_count {
                     let existing_big_block = match code <= self.continuous_block_end {
                         true => None,
-                        false => self.find_big_block(&big_block),
+                        false => self.find_block(&big_block, &self.index),
                     };
 
                     let index = match existing_big_block {
-                        Some(index) => index,
+                        Some(index) => index as u16,
                         None => {
                             let index = self.index.len() as u16;
                             self.index.append(&mut big_block);
@@ -221,45 +247,12 @@ impl WeightsTables
         encoder.encode(&codepoint, &mut extra, &mut self.stats)
     }
 
-    /// найти полностью совпадающий существующий большой блок (возвращает индекс, если блок найден)
-    fn find_big_block(&self, find: &Vec<u16>) -> Option<u16>
-    {
-        let sb_count = self.small_blocks_in_big();
-        let primary_sb = (self.primary_index_len() / sb_count) as usize;
-
-        let blocks = self.index.len() / sb_count as usize;
-
-        for block in primary_sb .. blocks {
-            let start = block * sb_count as usize;
-            let end = (block + 1) * sb_count as usize - 1;
-
-            let left = &self.index[start ..= end];
-            let right = find.as_slice();
-
-            if left == right {
-                return Some(block as u16 * sb_count as u16);
-            }
-        }
-
-        None
-    }
-
     /// найти полностью совпадающий существующий блок
-    fn find_small_block(&self, find: &Vec<u64>) -> Option<u32>
+    fn find_block<T: PartialEq>(&self, find: &Vec<T>, source: &Vec<T>) -> Option<u32>
     {
-        assert_eq!(find.len() as u32, self.small_block_size());
-
-        let blocks = self.data.len() as u32 / self.small_block_size();
-
-        for block in 0 .. blocks {
-            let start = (block * self.small_block_size()) as usize;
-            let end = ((block + 1) * self.small_block_size() - 1) as usize;
-
-            let left = &self.data[start ..= end];
-            let right = find.as_slice();
-
-            if left == right {
-                return Some(block * self.small_block_size());
+        for (i, window) in source.windows(find.len()).enumerate() {
+            if window == find {
+                return Some(i as u32);
             }
         }
 
