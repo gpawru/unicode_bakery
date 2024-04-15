@@ -17,7 +17,6 @@ pub struct WeightsTables
     pub scalars32: Vec<u32>,
     pub scalars64: Vec<u64>,
     pub weights: Vec<u32>,
-    pub decompositions: Vec<u32>,
     pub bits_total: u8,
     pub bits_big_block: u8,
     pub bits_small_block: u8,
@@ -43,7 +42,6 @@ impl WeightsTables
             scalars32: vec![],
             scalars64: vec![],
             weights: vec![],
-            decompositions: vec![],
             bits_total: 18,
             bits_big_block,
             bits_small_block,
@@ -63,7 +61,6 @@ impl WeightsTables
             + self.scalars32.len() * 4
             + self.scalars64.len() * 8
             + self.weights.len() * 4
-            + self.decompositions.len() * 4
     }
 
     /// позиция записи кодпоинта в data
@@ -241,7 +238,6 @@ impl WeightsTables
         let mut extra = AdditionalInfo {
             trie_node: weights_entry,
             weights: &mut self.weights,
-            decompositions: &mut self.decompositions,
         };
 
         encoder.encode(&codepoint, &mut extra, &mut self.stats)

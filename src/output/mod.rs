@@ -131,7 +131,6 @@ pub fn write_weights(classname: impl AsRef<str>, filename: impl AsRef<str>, tabl
             scalars32: &[{}  ],\n  \
             scalars64: &[{}  ],\n  \
             weights: &[{}  ],\n  \
-            decompositions: &[{}  ],\n  \
             continuous_block_end: 0x{:04X},\n\
         }}\n",
         classname.as_ref(),
@@ -139,7 +138,6 @@ pub fn write_weights(classname: impl AsRef<str>, filename: impl AsRef<str>, tabl
         format_num_vec(tables.scalars32.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.scalars64.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.weights.as_slice(), FORMAT_STRING_LENGTH),
-        format_num_vec(tables.decompositions.as_slice(), FORMAT_STRING_LENGTH),
         tables.continuous_block_end,
     );
 

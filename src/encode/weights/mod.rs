@@ -83,8 +83,6 @@ pub struct AdditionalInfo<'a>
     pub trie_node: Option<&'a TrieNode>,
     /// заполняемый дополнительный блок весов / расширений
     pub weights: &'a mut Vec<u32>,
-    /// заполняемый массив декомпозиций
-    pub decompositions: &'a mut Vec<u32>,
 }
 
 impl<'a> EncodeCodepoint<u64, u32, AdditionalInfo<'a>> for EncodeWeights<'a>
