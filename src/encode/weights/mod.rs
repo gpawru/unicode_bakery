@@ -8,8 +8,8 @@ use crate::encode::weights::implicit::is_implicit;
 use crate::stats::EncodeCodepointStats;
 
 pub const MARKER_STARTER_SINGLE_WEIGHTS: u8 = 0b_001;
-pub const MARKER_STARTER_DECOMPOSITION: u8 = 0b_010;
-pub const MARKER_STARTER_EXPANSION: u8 = 0b_011;
+pub const MARKER_STARTER_EXPANSION: u8 = 0b_010;
+pub const MARKER_STARTER_DECOMPOSITION: u8 = 0b_011;
 
 pub const MARKER_NONSTARTER_SINGLE_WEIGHTS: u8 = 0b_100;
 pub const MARKER_NONSTARTER_EXPANSION_OR_DECOMPOSITION: u8 = 0b_101;
