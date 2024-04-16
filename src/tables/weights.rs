@@ -122,26 +122,30 @@ impl WeightsTables
                 let small_block_index = if is_u32 {
                     let small_block = small_block.iter().map(|&e| e as u32).collect::<Vec<u32>>();
 
-                    let index = match self.find_block(&small_block, &self.scalars32) {
-                        Some(index) => index,
-                        None => {
-                            let index = self.scalars32.len() as u32;
-                            self.scalars32.extend(&small_block);
-                            index
-                        }
-                    };
+                    let index =
+                        match self.find_block(&small_block, &self.scalars32, self.bits_small_block)
+                        {
+                            Some(index) => index,
+                            None => {
+                                let index = self.scalars32.len() as u32;
+                                self.scalars32.extend(&small_block);
+                                index
+                            }
+                        };
 
                     assert!(index < 0x7FFF);
                     index << 1
                 } else {
-                    let index = match self.find_block(&small_block, &self.scalars64) {
-                        Some(index) => index,
-                        None => {
-                            let index = self.scalars64.len() as u32;
-                            self.scalars64.extend(&small_block);
-                            index
-                        }
-                    };
+                    let index =
+                        match self.find_block(&small_block, &self.scalars64, self.bits_small_block)
+                        {
+                            Some(index) => index,
+                            None => {
+                                let index = self.scalars64.len() as u32;
+                                self.scalars64.extend(&small_block);
+                                index
+                            }
+                        };
 
                     assert!(index < 0x7FFF);
                     (index << 1) | 1
@@ -155,7 +159,11 @@ impl WeightsTables
                 if big_block.len() as u32 == sb_count {
                     let existing_big_block = match code <= self.continuous_block_end {
                         true => None,
-                        false => self.find_block(&big_block, &self.index),
+                        false => self.find_block(
+                            &big_block,
+                            &self.index,
+                            self.bits_total - self.bits_big_block - self.bits_small_block,
+                        ),
                     };
 
                     let index = match existing_big_block {
@@ -244,10 +252,21 @@ impl WeightsTables
     }
 
     /// найти полностью совпадающий существующий блок
-    fn find_block<T: PartialEq>(&self, find: &Vec<T>, source: &Vec<T>) -> Option<u32>
+    fn find_block<T: PartialEq>(
+        &self,
+        find: &Vec<T>,
+        source: &Vec<T>,
+        align_bits: u8,
+    ) -> Option<u32>
     {
+        let mask = (1 << align_bits) - 1;
+
         for (i, window) in source.windows(find.len()).enumerate() {
             if window == find {
+                if i & mask != 0 {
+                    continue;
+                }
+
                 return Some(i as u32);
             }
         }
