@@ -579,10 +579,10 @@ fn ignore_decomposition_starters(
             let weights = bake_weights_vec(trie_node.weights);
             let (len, pos) = bake_extra(&mut extra.weights, &weights);
 
-            assert!(len <= 0x3F); // 6 бит
-            assert!(pos <= 0xFFFF); // 16 бит
+            assert!(len <= 0xFF); // 8 бит
+            assert!(pos <= 0x3FFF); // 14 бит
 
-            encoded!(MARKER_STARTER_EXPANSION, pos << 4, len << 20)
+            encoded!(MARKER_STARTER_EXPANSION, pos << 10, len << 24)
         }
     }
 }
@@ -679,11 +679,13 @@ fn decomposition_to_nonstarters(
 
     let mut data = vec![];
 
-    for (i, codepoint) in decomposition.iter().enumerate() {
-        let trie = encoder.trie.get(&codepoint.code)?;
+    for (i, entry_codepoint) in decomposition.iter().enumerate() {
+        let trie = encoder.trie.get(&entry_codepoint.code)?;
         let is_last = i == decomposition.len() - 1;
 
-        data.extend(bake_trie(codepoint.code, trie, is_last));
+        // можем встретить в декомпозиции U+0F71 - нестартер, участвующий в сокращении
+
+        data.extend(bake_trie(entry_codepoint.code, trie, is_last));
     }
 
     let (len, pos) = bake_extra(&mut extra.weights, &data);
@@ -705,7 +707,7 @@ fn decomposition_to_nonstarters(
 
 /// кодпоинт с декомпозицией
 ///
-/// mmm_ cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
+/// mmm_ cccc  ccii iiii    iiii iiii  llll llll        iiii iiii  iiii ii__    llll llll  _____ ____
 ///
 fn has_decomposition(
     encoder: &EncodeWeights,
@@ -760,13 +762,18 @@ fn has_decomposition(
 
         description
             .push_str(format!("U+{:04X} ({}) ", codepoint.code, codepoint.ccc.u8()).as_str());
+
         data.extend(bake_trie(codepoint.code, trie, is_last));
     }
 
     let (len, pos) = bake_extra(&mut extra.weights, &data);
+    let (w_len, w_pos) = bake_extra(&mut extra.weights, &bake_weights_vec(trie_node.weights));
 
-    assert!(len <= 0x3F); // 6 бит
-    assert!(pos <= 0xFFFF); // 16 бит
+    assert!(len <= 0xFF); // 8 бит
+    assert!(pos <= 0x3FFF); // 14 бит
+
+    assert!(w_len <= 0xFF);
+    assert!(w_pos <= 0x3FFF);
 
     // CCC последнего кодпоинта декомпозиции
     let ccc = decomposition.last()?.ccc.compressed() as u64;
@@ -774,7 +781,7 @@ fn has_decomposition(
     assert!(ccc != 0);
 
     stats_codepoint!(stats, codepoint; description);
-    encoded!(MARKER_STARTER_DECOMPOSITION, ccc << 4, pos << 10, len << 24)
+    encoded!(MARKER_STARTER_DECOMPOSITION, ccc << 4, pos << 10, len << 24, w_pos << 32, w_len << 48)
 }
 
 /// вычисляемые веса
@@ -854,7 +861,9 @@ fn sequences(
 
     let ccc = codepoint.ccc.compressed() as u64;
 
-    stats_codepoint!(stats, codepoint, trie_node);
+    let description = format!("({})", codepoint.ccc.u8());
+
+    stats_codepoint!(stats, codepoint; description);
     encoded!(MARKER_SEQUENCES, ccc << 4, pos << 10, len << 24)
 }
 
