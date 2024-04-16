@@ -440,7 +440,6 @@ fn expansions_implicit_singletons(
 
 /// кодпоинт имеет декомпозицию - стартер + нестартер
 /// случай, когда декомпозицию можно игнорировать и запечь кодпоинт как стартер с одинарными весами
-/// (или стартер - расширение в дальнейшем, если будем использовать FCD)
 fn ignore_decomposition_pair_starter_nonstarter(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
