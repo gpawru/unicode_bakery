@@ -742,15 +742,12 @@ fn has_decomposition(
         .collect::<String>();
 
     /*
-        есть 2 особенных кодпоинта - они являются первыми кодпоинтами сокращений, с декомпозицией в 2 стартера.
-        если использовать какие-то "быстрые" алгоритмы, то нужно учитывать этот момент
-
-        U+0CCA KANNADA VOWEL SIGN O
-        U+0DDC SINHALA VOWEL SIGN KOMBUVA HAA AELA-PILLA
+        есть 2 особенных кодпоинта - U+0CCA, U+0DDC, они являются первыми кодпоинтами сокращений,
+        с декомпозицией в 2 стартера. имеет смысл убрать их из этого блока
     */
-
     if trie_node.children.is_some() {
-        assert!([0x0CCA, 0xDDC].contains(&codepoint.code));
+        assert!([0x0CCA, 0x0DDC].contains(&codepoint.code));
+        return None;
     }
 
     let mut description = format!("[{}] ", starters_map);
@@ -773,6 +770,8 @@ fn has_decomposition(
 
     // CCC последнего кодпоинта декомпозиции
     let ccc = decomposition.last()?.ccc.compressed() as u64;
+
+    assert!(ccc != 0);
 
     stats_codepoint!(stats, codepoint; description);
     encoded!(MARKER_STARTER_DECOMPOSITION, ccc << 4, pos << 10, len << 24)
@@ -836,9 +835,16 @@ fn sequences(
 
     #[rustfmt::skip]
     blocking_checks!(
-        decomposition.is_some(),
         trie_node.children.is_none()        // кодпоинт является началом последовательности
     );
+
+    /*
+        U+0CCA KANNADA VOWEL SIGN O
+        U+0DDC SINHALA VOWEL SIGN KOMBUVA HAA AELA-PILLA
+    */
+    if decomposition.is_some() {
+        assert!([0x0CCA, 0x0DDC].contains(&codepoint.code));
+    }
 
     let trie = bake_trie(codepoint.code, trie_node, true);
     let (len, pos) = bake_extra(&mut extra.weights, &trie);
