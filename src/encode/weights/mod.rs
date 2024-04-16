@@ -308,7 +308,7 @@ fn nonstarter_singletons(
 
 /// расширения для стартеров (несколько весов)
 ///
-/// mmm_ iiii  iiii iiii    iiii llll  ll__ ____        ____ ____  ____ ____    ____ ____  _____ ____
+/// mmm_ ____  __ii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
 ///
 fn starter_expansions(
     encoder: &EncodeWeights,
@@ -334,11 +334,11 @@ fn starter_expansions(
     let weights = bake_weights_vec(trie_node.weights);
     let (len, pos) = bake_extra(&mut extra.weights, &weights);
 
-    assert!(len <= 0x3F); // 6 бит
-    assert!(pos <= 0xFFFF); // 16 бит
+    assert!(len <= 0xFF); // 8 бит
+    assert!(pos <= 0x3FFF); // 14 бит
 
     stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_STARTER_EXPANSION, pos << 4, len << 4)
+    encoded!(MARKER_STARTER_EXPANSION, pos << 10, len << 24)
 }
 
 /// расширения для нестартеров (несколько весов)
