@@ -9,13 +9,10 @@ use crate::stats::EncodeCodepointStats;
 
 pub const MARKER_STARTER_SINGLE_WEIGHTS: u8 = 0b_001;
 pub const MARKER_STARTER_EXPANSION: u8 = 0b_010;
-pub const MARKER_STARTER_DECOMPOSITION: u8 = 0b_011;
+pub const MARKER_STARTER_DECOMPOSITION_OR_TRIE: u8 = 0b_011;
 
 pub const MARKER_NONSTARTER_SINGLE_WEIGHTS: u8 = 0b_100;
-pub const MARKER_NONSTARTER_EXPANSION_OR_DECOMPOSITION: u8 = 0b_101;
-
-pub const MARKER_SEQUENCES: u8 = 0b_110;
-pub const MARKER_IMPLICIT_OR_HANGUL: u8 = 0b_111;
+pub const MARKER_NONSTARTER_TRIE: u8 = 0b_101;
 
 pub mod implicit;
 
@@ -79,10 +76,10 @@ impl<'a> EncodeWeights<'a>
 
 pub struct AdditionalInfo<'a>
 {
-    /// информация о весах кодпоинта
-    pub trie_node: Option<&'a TrieNode>,
     /// заполняемый дополнительный блок весов / расширений
-    pub weights: &'a mut Vec<u32>,
+    pub tries: &'a mut Vec<u32>,
+    /// заполняемый дополнительный блок расширений
+    pub expansions: &'a mut Vec<u32>,
 }
 
 impl<'a> EncodeCodepoint<u64, u32, AdditionalInfo<'a>> for EncodeWeights<'a>
@@ -146,7 +143,73 @@ macro_rules! encoded {
     };
     ($marker: expr, $($expr: expr),+) => {
         Some(EncodedCodepoint::new($(($expr) |)+ ($marker as u64)))
-}}
+    };
+
+}
+
+// стартер, одинарные веса
+/// mmm_ wwww  wwww wwww    wwww wwww  wwww wwww        wwww ____  ____ ____    ____ ____  _____ ____
+macro_rules! encoded_starter_single_weights {
+    ($weights: expr) => {{
+        assert!($weights <= 0xFFFF_FFFF); // 32 бита
+
+        encoded!(MARKER_STARTER_SINGLE_WEIGHTS, $weights << 4)
+    }};
+}
+
+// нестартер, одинарные веса
+/// mmm_ cccc  ccww wwww    wwww wwww  wwww wwww        wwww wwww  ww__ ____    ____ ____  _____ ____
+macro_rules! encoded_nonstarter_single_weights {
+    ($ccc: expr, $weights: expr) => {{
+        assert!($ccc <= 0x3F); // 6 бит
+        assert!($weights <= 0xFFFF_FFFF); // 32 бита
+
+        encoded!(MARKER_NONSTARTER_SINGLE_WEIGHTS, $ccc << 4, $weights << 10)
+    }};
+}
+
+// стартер, расширение
+// mmm_ ____  __ii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
+macro_rules! encoded_starter_expansion {
+    ($pos: expr, $len: expr) => {{
+        assert!($len <= 0xFF); // 8 бит
+        assert!($pos <= 0x3FFF); // 14 бит
+
+        encoded!(MARKER_STARTER_EXPANSION, $pos << 10, $len << 24)
+    }};
+}
+
+// стартер - декомпозиция или последовательности
+// mmmT cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
+macro_rules! encoded_starter_decomposition_or_trie {
+    ($is_trie: expr, $ccc: expr, $pos: expr, $len: expr) => {{
+        assert!($ccc <= 0x3F); // 6 бит
+        assert!($len <= 0xFF); // 8 бит
+        assert!($pos <= 0x3FFF); // 14 бит
+
+        let is_trie = $is_trie as u64;
+
+        encoded!(
+            MARKER_STARTER_DECOMPOSITION_OR_TRIE,
+            is_trie << 3,
+            $ccc << 4,
+            $pos << 10,
+            $len << 24
+        )
+    }};
+}
+
+// нестартер - расширение, сокращение, декомпозиция
+// mmm_ cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
+macro_rules! encoded_nonstarter_trie {
+    ($ccc: expr, $pos: expr, $len: expr) => {{
+        assert!($ccc <= 0x3F); // 6 бит
+        assert!($len <= 0xFF); // 8 бит
+        assert!($pos <= 0x3FFF); // 14 бит
+
+        encoded!(MARKER_NONSTARTER_TRIE, $ccc << 4, $pos << 10, $len << 24)
+    }};
+}
 
 macro_rules! stats_codepoint {
     ($stats: ident, $codepoint: expr) => {
@@ -167,122 +230,114 @@ macro_rules! stats_codepoint {
     };
 }
 
-/// стартер без декомпозиции, одинарные веса
-///
-/// mmm_ wwww  wwww wwww    wwww wwww  wwww wwww        wwww ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_STARTER_SINGLE_WEIGHTS: стартер без декомпозиции, одинарные веса
 fn starter_single_weights(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
-    extra: &mut AdditionalInfo,
+    _extra: &mut AdditionalInfo,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
     let stats = stats.touch("обычный стартер");
     let decomposition = encoder.decomposition(codepoint.code);
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
         hangul::is_syllable(codepoint.code), // не слог хангыль
         codepoint.is_nonstarter(),           // не нестартер
         decomposition.is_some(),             // не должен иметь декомпозицию
-        trie_node.children.is_some(),        // нет последовательностей, начинающихся с этого кодпоинта
-        trie_node.weights.len() != 1         // одинарные веса
+        trie.children.is_some(),             // нет последовательностей, начинающихся с этого кодпоинта
+        trie.weights.len() != 1              // одинарные веса
     );
 
     // P.S. может участвовать в комбинациях
 
-    let weights = bake_weights(&trie_node.weights[0]) as u64;
+    let weights = bake_weights(&trie.weights[0]) as u64;
 
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_STARTER_SINGLE_WEIGHTS, weights << 4)
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_starter_single_weights!(weights)
 }
 
-/// синглтон, одинарные веса -> MARKER_STARTER_SINGLE_WEIGHTS
+/// MARKER_STARTER_SINGLE_WEIGHTS: синглтон, одинарные веса
 fn singletons(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
-    extra: &mut AdditionalInfo,
+    _extra: &mut AdditionalInfo,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
     let stats = stats.touch("синглтон, одинарные веса");
     let decomposition = encoder.decomposition(codepoint.code)?;
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     blocking_checks!(
         codepoint.is_nonstarter(),        // только стартеры
         decomposition.len() != 1,         // должен быть синглтоном
         decomposition[0].is_nonstarter(), // декомпозиция - в стартер
-        trie_node.children.is_some(),     // нет последовательностей, начинающихся с этого кодпоинта
-        trie_node.weights.len() != 1      // одинарные веса
+        trie.children.is_some(),          // нет последовательностей, начинающихся с этого кодпоинта
+        trie.weights.len() != 1           // одинарные веса
     );
 
     // мы должны быть уверены, что у кодпоинта и декомпозиции одинаковые веса и нет последовательностей
     // более того, кодпоинт декомпозиции - обычный стартер, не являющийся частью каких-либо комбинаций
 
-    assert_eq!(trie_node, &encoder.trie[&decomposition[0].code]);
+    assert_eq!(trie, &encoder.trie[&decomposition[0].code]);
 
-    let weights = bake_weights(&trie_node.weights[0]) as u64;
+    let weights = bake_weights(&trie.weights[0]) as u64;
 
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_STARTER_SINGLE_WEIGHTS, weights << 4)
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_starter_single_weights!(weights)
 }
 
-/// нестартер без декомпозиции
-///
-/// mmm_ cccc  ccww wwww    wwww wwww  wwww wwww        wwww wwww  ww__ ____    ____ ____  _____ ____
-///
+/// MARKER_NONSTARTER_SINGLE_WEIGHTS: нестартер без декомпозиции
 fn nonstarter_single_weights(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
-    extra: &mut AdditionalInfo,
+    _extra: &mut AdditionalInfo,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
     let stats = stats.touch("обычный нестартер");
     let decomposition = encoder.decomposition(codepoint.code);
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
         codepoint.is_starter(),            // кодпоинт - нестартер
         decomposition.is_some(),           // не имеет декомпозиции
-        trie_node.children.is_some(),      // нет последовательностей, начинающихся с этого кодпоинта
-        trie_node.weights.len() != 1       // одинарные веса
+        trie.children.is_some(),           // нет последовательностей, начинающихся с этого кодпоинта
+        trie.weights.len() != 1            // одинарные веса
     );
 
     // P.S. может участвовать в комбинациях
 
     let ccc = codepoint.ccc.compressed() as u64;
-    let weights = bake_weights(&trie_node.weights[0]) as u64;
+    let weights = bake_weights(&trie.weights[0]) as u64;
 
-    assert!(ccc <= 0x3F); // 6 бит
-
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_NONSTARTER_SINGLE_WEIGHTS, ccc << 4, weights << 10)
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_nonstarter_single_weights!(ccc, weights)
 }
 
-/// нестартер с декомпозицией в другой нестартер, с теми же весами и CCC -> MARKER_NONSTARTER_SINGLE_WEIGHTS
+/// MARKER_NONSTARTER_SINGLE_WEIGHTS: нестартер с декомпозицией в другой нестартер, с теми же весами и CCC
 fn nonstarter_singletons(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
-    extra: &mut AdditionalInfo,
+    _extra: &mut AdditionalInfo,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
     let stats = stats.touch("нестартер - синглтон");
     let decomposition = encoder.decomposition(codepoint.code)?;
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
         codepoint.is_starter(),                 // кодпоинт - нестартер
         decomposition.len() != 1,               // декомпозиция - в 1 нестартер
         decomposition[0].ccc != codepoint.ccc,  // CCC оригинального кодпоинта и CCC декомпозиции совпадают
-        trie_node.children.is_some(),           // нет последовательностей, начинающихся с этого кодпоинта
-        trie_node.weights.len() != 1            // одинарные веса
+        trie.children.is_some(),                // нет последовательностей, начинающихся с этого кодпоинта
+        trie.weights.len() != 1                 // одинарные веса
     );
 
     // не участвуют в комбинациях
@@ -293,23 +348,21 @@ fn nonstarter_singletons(
         });
 
     // одинаковые веса
-    assert_eq!(trie_node, &encoder.trie[&decomposition[0].code]);
+    assert_eq!(trie, &encoder.trie[&decomposition[0].code]);
 
     // U+0340 - COMBINING GRAVE TONE MARK - [.0000.0025.0002]
     // U+0341 - COMBINING ACUTE TONE MARK - [.0000.0024.0002]
     // U+0343 - COMBINING GREEK KORONIS - [.0000.0022.0002]
+    assert!([0x0340, 0x0341, 0x0343].contains(&codepoint.code));
 
     let ccc = codepoint.ccc.compressed() as u64;
-    let weights = bake_weights(&trie_node.weights[0]) as u64;
+    let weights = bake_weights(&trie.weights[0]) as u64;
 
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_NONSTARTER_SINGLE_WEIGHTS, ccc << 4, weights << 10)
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_nonstarter_single_weights!(ccc, weights)
 }
 
-/// расширения для стартеров (несколько весов)
-///
-/// mmm_ ____  __ii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_STARTER_EXPANSION: расширения для стартеров (несколько весов)
 fn starter_expansions(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -319,32 +372,26 @@ fn starter_expansions(
 {
     let stats = stats.touch("стартер, расширения");
     let decomposition = encoder.decomposition(codepoint.code);
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
         codepoint.is_nonstarter(),      // стартер
         decomposition.is_some(),        // нет декомпозиции
-        trie_node.children.is_some(),   // нет последовательностей, начинающихся с этого кодпоинта
-        trie_node.weights.len() == 1    // несколько весов
+        trie.children.is_some(),        // нет последовательностей, начинающихся с этого кодпоинта
+        trie.weights.len() == 1         // является расширением
     );
 
     // P.S.: может участвовать в комбинациях
 
-    let weights = bake_weights_vec(trie_node.weights);
-    let (len, pos) = bake_extra(&mut extra.weights, &weights);
+    let weights = bake_weights_vec(trie.weights);
+    let (len, pos) = bake_extra(&mut extra.expansions, &weights);
 
-    assert!(len <= 0xFF); // 8 бит
-    assert!(pos <= 0x3FFF); // 14 бит
-
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_STARTER_EXPANSION, pos << 10, len << 24)
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_starter_expansion!(pos, len)
 }
 
-/// расширения для нестартеров (несколько весов)
-///
-/// mmm_ cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_NONSTARTER_TRIE: расширения для нестартеров (несколько весов) / последовательности (сокращения)
 fn nonstarter_expansions(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -352,42 +399,35 @@ fn nonstarter_expansions(
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
-    let stats = stats.touch("нестартер, расширения");
+    let stats = stats.touch("нестартер, расширения или сокращения");
     let decomposition = encoder.decomposition(codepoint.code);
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
-        codepoint.is_starter(),         // нестартер
-        decomposition.is_some(),        // нет декомпозиции
-        trie_node.children.is_some(),   // нет последовательностей, начинающихся с этого кодпоинта
-        trie_node.weights.len() == 1    // несколько весов
+        codepoint.is_starter(),                                  // нестартер
+        decomposition.is_some(),                                 // нет декомпозиции
+        (trie.weights.len() == 1) && trie.children.is_none()     // несколько весов (или U+0F71)
     );
 
-    // не участвуют в комбинациях
-    assert!(encoder.check_codepoint_sequence(codepoint.code).is_none());
+    // U+0F71 TIBETAN VOWEL SIGN AA
+    if trie.children.is_some() {
+        assert!(codepoint.code == 0x0F71);
+    } else {
+        // не участвуют в комбинациях
+        assert!(encoder.check_codepoint_sequence(codepoint.code).is_none());
+    }
 
-    let data = bake_trie(codepoint.code, trie_node, true);
-    let (len, pos) = bake_extra(&mut extra.weights, &data);
-
-    assert!(len <= 0xFF); // 8 бит
-    assert!(pos <= 0x3FFF); // 14 бит
+    let data = bake_trie(codepoint.code, trie, true);
+    let (len, pos) = bake_extra(&mut extra.tries, &data);
 
     let ccc = codepoint.ccc.compressed() as u64;
 
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(
-        MARKER_NONSTARTER_EXPANSION_OR_DECOMPOSITION,
-        ccc << 4,
-        pos << 10,
-        len << 24
-    )
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_nonstarter_trie!(ccc, pos, len)
 }
 
-/// синглтоны - декомпозиция в стартер с вычисляемыми весами
-///
-/// mmm_ ____  AAAA AAAA    BBBB BBBB  BBBB BBBB        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_STARTER_EXPANSION: синглтоны - декомпозиция в стартер с вычисляемыми весами
 fn expansions_implicit_singletons(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -397,7 +437,7 @@ fn expansions_implicit_singletons(
 {
     let stats = stats.touch("синглтоны - декомпозиция в стартер с вычисляемыми весами");
     let decomposition = encoder.decomposition(codepoint.code)?;
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
@@ -416,40 +456,29 @@ fn expansions_implicit_singletons(
             assert!(encoder.check_codepoint_sequence(c).is_none());
         });
 
-    // проверим вычисляемые веса
-    assert_eq!(trie_node.weights.len(), 2);
-    assert_eq!(trie_node.weights[0].l2, 0x20);
-    assert_eq!(trie_node.weights[0].l3, 0x02);
-    assert_eq!(trie_node.weights[1].l2, 0x00);
-    assert_eq!(trie_node.weights[1].l3, 0x00);
+    // альтернативный вариант - запечь с отдельным маркером AAAA / BBBB; с записью кодпоинта
+    // тут выбор - уменьшить размер данных или избавиться от дополнительной проверки
 
-    let aaaa = trie_node.weights[0].l1 as u64;
-    let bbbb = trie_node.weights[1].l1 as u64;
+    let weights = bake_weights_vec(trie.weights);
+    let (len, pos) = bake_extra(&mut extra.expansions, &weights);
 
-    assert!(aaaa >= 0xFB00);
-    assert!(bbbb >= 0x8000);
-
-    let aaaa = aaaa - 0xFB00;
-    let bbbb = bbbb - 0x8000;
-
-    assert!(aaaa <= 0xFF);
-
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_IMPLICIT_OR_HANGUL, aaaa << 8, bbbb << 16)
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_starter_expansion!(pos, len)
 }
 
+/// MARKER_STARTER_SINGLE_WEIGHTS:
 /// кодпоинт имеет декомпозицию - стартер + нестартер
 /// случай, когда декомпозицию можно игнорировать и запечь кодпоинт как стартер с одинарными весами
 fn ignore_decomposition_pair_starter_nonstarter(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
-    extra: &mut AdditionalInfo,
+    _extra: &mut AdditionalInfo,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
     let stats = stats.touch("декомпозиция не нужна, кейс - стартер-нестартер");
-    let trie_node = extra.trie_node?;
     let decomposition = encoder.decomposition(codepoint.code)?;
+    let trie = encoder.trie.get(&codepoint.code)?;
     let c0_trie = &encoder.trie[&decomposition[0].code];
 
     #[rustfmt::skip]
@@ -458,7 +487,7 @@ fn ignore_decomposition_pair_starter_nonstarter(
         decomposition.len() != 2,               // декомпозиция в пару
         decomposition[0].is_nonstarter(),       // стартер +
         decomposition[1].is_starter(),          // нестартер
-        trie_node.children.is_some(),           // нет последовательностей, начинающихся с этого кодпоинта
+        trie.children.is_some(),                // нет последовательностей, начинающихся с этого кодпоинта
         c0_trie.children.is_none()              // проверяем только сокращения
     );
 
@@ -508,8 +537,8 @@ fn ignore_decomposition_pair_starter_nonstarter(
     match contraction_trie {
         // нашли последовательность - это сокращение (contraction)
         Some(trie) => {
-            assert_eq!(trie_node.weights, trie.weights);
-            assert_eq!(trie_node.weights.len(), 1);
+            assert_eq!(trie.weights, trie.weights);
+            assert_eq!(trie.weights.len(), 1);
         }
         /*
            если не нашли, значит декомпозиция не является сокращением, и декомпозицию делать надо:
@@ -526,13 +555,13 @@ fn ignore_decomposition_pair_starter_nonstarter(
         }
     };
 
-    let weights = bake_weights(&trie_node.weights[0]) as u64;
+    let weights = bake_weights(&trie.weights[0]) as u64;
 
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(MARKER_STARTER_SINGLE_WEIGHTS, weights << 4)
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_starter_single_weights!(weights)
 }
 
-/// кодпоинт имеет декомпозицию только из стартеров -> MARKER_STARTER_SINGLE_WEIGHTS | MARKER_EXPANSION
+/// MARKER_STARTER_SINGLE_WEIGHTS | MARKER_EXPANSION: кодпоинт имеет декомпозицию только из стартеров
 fn ignore_decomposition_starters(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -541,14 +570,14 @@ fn ignore_decomposition_starters(
 ) -> Option<EncodedCodepoint<u64>>
 {
     let stats = stats.touch("декомпозиция не нужна, кейс - только стартеры");
-    let trie_node = extra.trie_node?;
     let decomposition = encoder.decomposition(codepoint.code)?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
         codepoint.is_nonstarter(),                       // стартер
         decomposition.iter().any(|c| c.is_nonstarter()), // декомпозиция из стартеров
-        trie_node.children.is_some()                     // нет последовательностей, начинающихся с этого кодпоинта
+        trie.children.is_some()                          // нет последовательностей, начинающихся с этого кодпоинта
     );
 
     // небольшой оффтопик - сюда могли бы попасть 2 кодпоинта: U+0CCA и U+0DDC, но они - частный случай сокращений
@@ -563,40 +592,37 @@ fn ignore_decomposition_starters(
         .iter()
         .for_each(|c| assert!(encoder.trie[&c.code].children.is_none()));
 
-    stats_codepoint!(stats, codepoint, trie_node);
+    stats_codepoint!(stats, codepoint, trie);
 
-    match trie_node.weights.len() {
+    match trie.weights.len() {
         // сокращения
         1 => {
-            let weights = bake_weights(&trie_node.weights[0]) as u64;
+            let weights = bake_weights(&trie.weights[0]) as u64;
 
-            stats_codepoint!(stats, codepoint, trie_node);
-            encoded!(MARKER_STARTER_SINGLE_WEIGHTS, weights << 4)
+            stats_codepoint!(stats, codepoint, trie);
+            encoded_starter_single_weights!(weights)
         }
         // обычная последовательность стартеров
         _ => {
-            let weights = bake_weights_vec(trie_node.weights);
-            let (len, pos) = bake_extra(&mut extra.weights, &weights);
+            let weights = bake_weights_vec(trie.weights);
+            let (len, pos) = bake_extra(&mut extra.expansions, &weights);
 
-            assert!(len <= 0xFF); // 8 бит
-            assert!(pos <= 0x3FFF); // 14 бит
-
-            encoded!(MARKER_STARTER_EXPANSION, pos << 10, len << 24)
+            encoded_starter_expansion!(pos, len)
         }
     }
 }
 
-/// частные случаи декомпозиции -> MARKER_STARTER_SINGLE_WEIGHTS
+/// MARKER_STARTER_SINGLE_WEIGHTS: частные случаи декомпозиции
 fn ignore_decomposition_other(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
-    extra: &mut AdditionalInfo,
+    _extra: &mut AdditionalInfo,
     stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
     let stats = stats.touch("декомпозиция не нужна, прочие кейсы");
-    let trie_node = extra.trie_node?;
     let decomposition = encoder.decomposition(codepoint.code)?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     let starters_map = decomposition
         .iter()
@@ -616,7 +642,7 @@ fn ignore_decomposition_other(
 
     if starters_map == "ssn" {
         // только сокращения
-        if trie_node.weights.len() != 1 {
+        if trie.weights.len() != 1 {
             return None;
         }
 
@@ -646,20 +672,17 @@ fn ignore_decomposition_other(
         }
 
         // прошли все проверки - значит, сокращение
-        let weights = bake_weights(&trie_node.weights[0]) as u64;
+        let weights = bake_weights(&trie.weights[0]) as u64;
 
-        stats_codepoint!(stats, codepoint, trie_node);
-        return encoded!(MARKER_STARTER_SINGLE_WEIGHTS, weights << 4);
+        stats_codepoint!(stats, codepoint, trie);
+        return encoded_starter_single_weights!(weights);
     }
 
     // место под следующие кейсы
     unreachable!()
 }
 
-/// декомпозиция в нестартеры
-///
-/// mmm_ cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_NONSTARTER_TRIE: декомпозиция в нестартеры
 fn decomposition_to_nonstarters(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -669,7 +692,7 @@ fn decomposition_to_nonstarters(
 {
     let stats = stats.touch("декомпозиция в нестартеры");
     let decomposition = encoder.decomposition(codepoint.code)?;
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
@@ -682,32 +705,21 @@ fn decomposition_to_nonstarters(
         let trie = encoder.trie.get(&entry_codepoint.code)?;
         let is_last = i == decomposition.len() - 1;
 
-        // можем встретить в декомпозиции U+0F71 - нестартер, участвующий в сокращении
+        // P.S. можем встретить в декомпозиции U+0F71 - нестартер, участвующий в сокращении
 
         data.extend(bake_trie(entry_codepoint.code, trie, is_last));
     }
 
-    let (len, pos) = bake_extra(&mut extra.weights, &data);
-
-    assert!(len <= 0xFF); // 8 бит
-    assert!(pos <= 0x3FFF); // 14 бит
+    let (len, pos) = bake_extra(&mut extra.tries, &data);
 
     // CCC последнего кодпоинта декомпозиции
     let ccc = decomposition.last()?.ccc.compressed() as u64;
 
-    stats_codepoint!(stats, codepoint, trie_node);
-    encoded!(
-        MARKER_NONSTARTER_EXPANSION_OR_DECOMPOSITION,
-        ccc << 4,
-        pos << 10,
-        len << 24
-    )
+    stats_codepoint!(stats, codepoint, trie);
+    encoded_nonstarter_trie!(ccc, pos, len)
 }
 
-/// кодпоинт с декомпозицией
-///
-/// mmm_ cccc  ccii iiii    iiii iiii  llll lwww        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_STARTER_DECOMPOSITION_OR_TRIE: кодпоинт с декомпозицией
 fn has_decomposition(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -717,7 +729,7 @@ fn has_decomposition(
 {
     let stats = stats.touch("кодпоинты с декомпозицией");
     let decomposition = encoder.decomposition(codepoint.code)?;
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
@@ -746,7 +758,7 @@ fn has_decomposition(
         есть 2 особенных кодпоинта - U+0CCA, U+0DDC, они являются первыми кодпоинтами сокращений,
         с декомпозицией в 2 стартера. имеет смысл убрать их из этого блока
     */
-    if trie_node.children.is_some() {
+    if trie.children.is_some() {
         assert!([0x0CCA, 0x0DDC].contains(&codepoint.code));
         return None;
     }
@@ -754,11 +766,11 @@ fn has_decomposition(
     let mut description = format!("[{}] ", starters_map);
 
     let mut data = vec![];
-    
-    // в начале данных декомпозиции запишем блок весов
-    data.extend(&bake_weights_vec(trie_node.weights));
-    let w_len = data.len() as u64;
 
+    // в начале данных декомпозиции запишем кодпоинт с весами
+    data.extend(bake_trie(codepoint.code, trie, true));
+
+    // затем - декомпозицию
     for (i, codepoint) in decomposition.iter().enumerate() {
         let trie = encoder.trie.get(&codepoint.code)?;
         let is_last = i == decomposition.len() - 1;
@@ -769,11 +781,7 @@ fn has_decomposition(
         data.extend(bake_trie(codepoint.code, trie, is_last));
     }
 
-    let (len, pos) = bake_extra(&mut extra.weights, &data);
-
-    assert!(len <= 0x1F); // 5 бит
-    assert!(w_len <= 0x7); // 3 бита
-    assert!(pos <= 0x3FFF); // 14 бит
+    let (len, pos) = bake_extra(&mut extra.tries, &data);
 
     // CCC последнего кодпоинта декомпозиции
     let ccc = decomposition.last()?.ccc.compressed() as u64;
@@ -781,27 +789,25 @@ fn has_decomposition(
     assert!(ccc != 0);
 
     stats_codepoint!(stats, codepoint; description);
-    encoded!(MARKER_STARTER_DECOMPOSITION, ccc << 4, pos << 10, len << 24, w_len << 29)
+    encoded_starter_decomposition_or_trie!(false, ccc, pos, len)
 }
 
-/// вычисляемые веса
-///
-/// 000_ ____  ____ ____    ____ ____  ____ ____        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// 0: вычисляемые веса
 fn implicit_weights(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
-    extra: &mut AdditionalInfo,
+    _extra: &mut AdditionalInfo,
     _stats: &mut EncodeCodepointStats,
 ) -> Option<EncodedCodepoint<u64>>
 {
     let decomposition = encoder.decomposition(codepoint.code);
+    let trie = encoder.trie.get(&codepoint.code);
 
     // чтобы уменьшить количество проверок, кодпоинты (Unified_Ideograph=True AND Block=CJK_Compatibility_Ideographs)
     // записаны в allkeys
     #[rustfmt::skip]
     blocking_checks!(
-        extra.trie_node.is_some(),              // веса не заданы
+        trie.is_some(),                         // веса не заданы
         decomposition.is_some(),                // нет декомпозиции
         !is_implicit(codepoint.code, false)     // является вычисляемым значением
     );
@@ -809,10 +815,7 @@ fn implicit_weights(
     encoded!(0)
 }
 
-/// слоги хангыль
-///
-/// mmm_ ____  ____ ____    ____ ____  ____ ____        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_STARTER_DECOMPOSITION_OR_TRIE: слоги хангыль
 fn hangul_syllables(
     _encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -821,14 +824,10 @@ fn hangul_syllables(
 ) -> Option<EncodedCodepoint<u64>>
 {
     blocking_checks!(!(0xAC00 ..= 0xD7A3).contains(&codepoint.code));
-
-    encoded!(MARKER_IMPLICIT_OR_HANGUL)
+    encoded_starter_decomposition_or_trie!(false, 0, 0, 0)
 }
 
-/// последовательности кодпоинтов
-///
-/// mmm_ cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
-///
+/// MARKER_STARTER_DECOMPOSITION_OR_TRIE: последовательности кодпоинтов
 fn sequences(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -838,23 +837,22 @@ fn sequences(
 {
     let stats = stats.touch("последовательности");
     let decomposition = encoder.decomposition(codepoint.code);
-    let trie_node = extra.trie_node?;
+    let trie = encoder.trie.get(&codepoint.code)?;
 
     #[rustfmt::skip]
     blocking_checks!(
-        trie_node.children.is_none()        // кодпоинт является началом последовательности
+        codepoint.is_nonstarter(),     // стартер
+        trie.children.is_none()        // кодпоинт является началом последовательности
     );
 
-    /*
-        U+0CCA KANNADA VOWEL SIGN O
-        U+0DDC SINHALA VOWEL SIGN KOMBUVA HAA AELA-PILLA
-    */
+    // U+0CCA KANNADA VOWEL SIGN O
+    // U+0DDC SINHALA VOWEL SIGN KOMBUVA HAA AELA-PILLA
     if decomposition.is_some() {
         assert!([0x0CCA, 0x0DDC].contains(&codepoint.code));
     }
 
-    let trie = bake_trie(codepoint.code, trie_node, true);
-    let (len, pos) = bake_extra(&mut extra.weights, &trie);
+    let trie = bake_trie(codepoint.code, trie, true);
+    let (len, pos) = bake_extra(&mut extra.tries, &trie);
 
     assert!(len <= 0xFF); // 8 бит
     assert!(pos <= 0x3FFF); // 14 бит
@@ -864,7 +862,7 @@ fn sequences(
     let description = format!("({})", codepoint.ccc.u8());
 
     stats_codepoint!(stats, codepoint; description);
-    encoded!(MARKER_SEQUENCES, ccc << 4, pos << 10, len << 24)
+    encoded_starter_decomposition_or_trie!(true, ccc, pos, len)
 }
 
 // --------------------------------------------------------------------------------------------------------------------

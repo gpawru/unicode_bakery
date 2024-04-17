@@ -130,14 +130,16 @@ pub fn write_weights(classname: impl AsRef<str>, filename: impl AsRef<str>, tabl
             index: &[{}  ],\n  \
             scalars32: &[{}  ],\n  \
             scalars64: &[{}  ],\n  \
-            weights: &[{}  ],\n  \
+            expansions: &[{}  ],\n  \
+            tries: &[{}  ],\n  \
             continuous_block_end: 0x{:04X},\n\
         }}\n",
         classname.as_ref(),
         format_num_vec(tables.index.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.scalars32.as_slice(), FORMAT_STRING_LENGTH),
         format_num_vec(tables.scalars64.as_slice(), FORMAT_STRING_LENGTH),
-        format_num_vec(tables.weights.as_slice(), FORMAT_STRING_LENGTH),
+        format_num_vec(tables.expansions.as_slice(), FORMAT_STRING_LENGTH),
+        format_num_vec(tables.tries.as_slice(), FORMAT_STRING_LENGTH),
         tables.continuous_block_end,
     );
 

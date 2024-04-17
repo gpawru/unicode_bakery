@@ -16,7 +16,8 @@ pub struct WeightsTables
     pub index: Vec<u16>,
     pub scalars32: Vec<u32>,
     pub scalars64: Vec<u64>,
-    pub weights: Vec<u32>,
+    pub expansions: Vec<u32>,
+    pub tries: Vec<u32>,
     pub bits_total: u8,
     pub bits_big_block: u8,
     pub bits_small_block: u8,
@@ -41,7 +42,8 @@ impl WeightsTables
             index: vec![],
             scalars32: vec![],
             scalars64: vec![],
-            weights: vec![],
+            expansions: vec![],
+            tries: vec![],
             bits_total: 18,
             bits_big_block,
             bits_small_block,
@@ -60,7 +62,8 @@ impl WeightsTables
         self.index.len() * 2
             + self.scalars32.len() * 4
             + self.scalars64.len() * 8
-            + self.weights.len() * 4
+            + self.expansions.len() * 4
+            + self.tries.len() * 4
     }
 
     /// позиция записи кодпоинта в data
@@ -189,16 +192,16 @@ impl WeightsTables
     /// закодировать кодпоинт
     fn encode(&mut self, code: u32, encoder: &EncodeWeights) -> Option<EncodedCodepoint<u64>>
     {
-        let weights_entry = encoder.trie.get(&code);
+        let trie = encoder.trie.get(&code);
         let codepoint = UNICODE.get(&code);
 
         // кодпоинт не задан вообще -> implicit weights (unknown)
-        if weights_entry.is_none() && codepoint.is_none() {
+        if trie.is_none() && codepoint.is_none() {
             return None;
         }
 
         // если кодпоинт не найден, то это означает только вариант с U+FFFE или U+FFFF
-        let codepoint = match weights_entry.is_some() && codepoint.is_none() {
+        let codepoint = match trie.is_some() && codepoint.is_none() {
             true => {
                 assert!(code == 0xFFFE || code == 0xFFFF);
                 Codepoint {
@@ -220,32 +223,9 @@ impl WeightsTables
             false => codepoint.unwrap().clone(),
         };
 
-        // не заданы веса - вычисляемые веса или слоги хангыль
-        if weights_entry.is_none() {
-            assert!(
-                [
-                    "Hangul Syllable",
-                    "CJK Ideograph",
-                    "Tangut",
-                    "Nushu",
-                    "Khitan"
-                ]
-                .iter()
-                .any(|variant| {
-                    codepoint
-                        .name
-                        .to_lowercase()
-                        .contains(&variant.to_lowercase())
-                }),
-                "U+{:04X} - {}",
-                codepoint.code,
-                codepoint.name
-            );
-        }
-
         let mut extra = AdditionalInfo {
-            trie_node: weights_entry,
-            weights: &mut self.weights,
+            expansions: &mut self.expansions,
+            tries: &mut self.tries,
         };
 
         encoder.encode(&codepoint, &mut extra, &mut self.stats)
