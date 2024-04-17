@@ -413,6 +413,11 @@ fn nonstarter_expansions(
     // U+0F71 TIBETAN VOWEL SIGN AA
     if trie.children.is_some() {
         assert!(codepoint.code == 0x0F71);
+
+        for (code, trie) in trie.children.as_ref().unwrap() {
+            assert!(trie.children.is_none());
+            assert!(UNICODE.get(code)?.is_nonstarter());
+        }
     } else {
         // не участвуют в комбинациях
         assert!(encoder.check_codepoint_sequence(codepoint.code).is_none());
@@ -705,8 +710,6 @@ fn decomposition_to_nonstarters(
         let trie = encoder.trie.get(&entry_codepoint.code)?;
         let is_last = i == decomposition.len() - 1;
 
-        // P.S. можем встретить в декомпозиции U+0F71 - нестартер, участвующий в сокращении
-
         data.extend(bake_trie(entry_codepoint.code, trie, is_last));
     }
 
@@ -737,14 +740,6 @@ fn has_decomposition(
         decomposition[0].is_nonstarter()    // декомпозиция начинается со стартера
     );
 
-    // кодпоинты декомпозиции, кроме первого, не являются первыми элементами последовательностей
-    assert!(decomposition[1 ..].iter().all(|c| encoder
-        .trie
-        .get(&c.code)
-        .unwrap()
-        .children
-        .is_none()));
-
     // карта стартеров. для NFD случая это "ss", "sn", "snn", "snnn"
     let starters_map = decomposition
         .iter()
@@ -754,14 +749,26 @@ fn has_decomposition(
         })
         .collect::<String>();
 
-    /*
-        есть 2 особенных кодпоинта - U+0CCA, U+0DDC, они являются первыми кодпоинтами сокращений,
-        с декомпозицией в 2 стартера. имеет смысл убрать их из этого блока
-    */
+    // есть 2 особенных кодпоинта - U+0CCA, U+0DDC, они являются первыми кодпоинтами сокращений,
+    // с декомпозицией в 2 стартера. имеет смысл убрать их из этого блока
     if trie.children.is_some() {
         assert!([0x0CCA, 0x0DDC].contains(&codepoint.code));
         return None;
     }
+
+    // кодпоинты декомпозиции, кроме первого, не являются первыми элементами последовательностей
+    assert!(decomposition[1 ..].iter().all(|c| encoder
+        .trie
+        .get(&c.code)
+        .unwrap()
+        .children
+        .is_none()));
+
+    // можно быть уверенными, что если встретили декомпозицию - она не является продолжением последовательности
+    assert!(encoder.check_codepoint_sequence(codepoint.code).is_none());
+    assert!(encoder
+        .check_codepoint_sequence(decomposition[0].code)
+        .is_none());
 
     let mut description = format!("[{}] ", starters_map);
 
@@ -780,6 +787,12 @@ fn has_decomposition(
 
         data.extend(bake_trie(codepoint.code, trie, is_last));
     }
+
+    let description = format!(
+        "{}{}",
+        description,
+        get_trie_description(codepoint, &encoder.trie[&decomposition[0].code])
+    );
 
     let (len, pos) = bake_extra(&mut extra.tries, &data);
 
@@ -851,17 +864,15 @@ fn sequences(
         assert!([0x0CCA, 0x0DDC].contains(&codepoint.code));
     }
 
-    let trie = bake_trie(codepoint.code, trie, true);
-    let (len, pos) = bake_extra(&mut extra.tries, &trie);
+    let trie_vec = bake_trie(codepoint.code, trie, true);
+    let (len, pos) = bake_extra(&mut extra.tries, &trie_vec);
 
     assert!(len <= 0xFF); // 8 бит
     assert!(pos <= 0x3FFF); // 14 бит
 
     let ccc = codepoint.ccc.compressed() as u64;
 
-    let description = format!("({})", codepoint.ccc.u8());
-
-    stats_codepoint!(stats, codepoint; description);
+    stats_codepoint!(stats, codepoint; get_trie_description(codepoint, trie));
     encoded_starter_decomposition_or_trie!(true, ccc, pos, len)
 }
 
@@ -986,4 +997,55 @@ fn bake_extra(data: &mut Vec<u32>, entry: &Vec<u32>) -> (u64, u64)
     } as u64;
 
     (len, pos)
+}
+
+// описание деревьев
+fn get_trie_description(codepoint: &Codepoint, trie: &TrieNode) -> String
+{
+    if trie.children.is_none() {
+        return "".to_owned();
+    }
+
+    let mut description = "\n".to_owned();
+    for (code2, node) in trie.children.as_ref().unwrap().iter() {
+        description.push_str(
+            format!(
+                "\t{:04X}({}) + {:04X}({}) - {}\n",
+                codepoint.code,
+                codepoint.ccc.u8(),
+                code2,
+                UNICODE.get(code2).unwrap().ccc.u8(),
+                node.weights
+                    .iter()
+                    .map(|w| w.formatted())
+                    .collect::<String>()
+            )
+            .as_str(),
+        );
+
+        if let Some(children) = node.children.as_ref() {
+            for (code3, node) in children.iter() {
+                description.push_str(
+                    format!(
+                        "\t\t{:04X}({}) + {:04X}({}) + {:04X}({}) - {}\n",
+                        codepoint.code,
+                        codepoint.ccc.u8(),
+                        code2,
+                        UNICODE.get(code2).unwrap().ccc.u8(),
+                        code3,
+                        UNICODE.get(code3).unwrap().ccc.u8(),
+                        node.weights
+                            .iter()
+                            .map(|w| w.formatted())
+                            .collect::<String>()
+                    )
+                    .as_str(),
+                );
+
+                assert!(node.children.is_none());
+            }
+        }
+    }
+
+    description.trim_end().to_owned()
 }
