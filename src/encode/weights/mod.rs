@@ -147,7 +147,7 @@ macro_rules! encoded {
 
 }
 
-// стартер, одинарные веса
+/// стартер, одинарные веса
 /// mmm_ wwww  wwww wwww    wwww wwww  wwww wwww        wwww ____  ____ ____    ____ ____  _____ ____
 macro_rules! encoded_starter_single_weights {
     ($weights: expr) => {{
@@ -157,30 +157,30 @@ macro_rules! encoded_starter_single_weights {
     }};
 }
 
-// нестартер, одинарные веса
-/// mmm_ cccc  ccww wwww    wwww wwww  wwww wwww        wwww wwww  ww__ ____    ____ ____  _____ ____
+/// нестартер, одинарные веса
+/// mmm_ wwww  wwww wwww    wwww wwww  wwww wwww        wwww cccc  cc__ ____    ____ ____  _____ ____
 macro_rules! encoded_nonstarter_single_weights {
     ($ccc: expr, $weights: expr) => {{
         assert!($ccc <= 0x3F); // 6 бит
         assert!($weights <= 0xFFFF_FFFF); // 32 бита
 
-        encoded!(MARKER_NONSTARTER_SINGLE_WEIGHTS, $ccc << 4, $weights << 10)
+        encoded!(MARKER_NONSTARTER_SINGLE_WEIGHTS, $weights << 4, $ccc << 36)
     }};
 }
 
-// стартер, расширение
-// mmm_ ____  __ii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
+/// стартер, расширение
+/// mmm_ iiii  iiii iiii    iill llll  ll__ ____        ____ ____  ____ ____    ____ ____  _____ ____
 macro_rules! encoded_starter_expansion {
     ($pos: expr, $len: expr) => {{
         assert!($len <= 0xFF); // 8 бит
         assert!($pos <= 0x3FFF); // 14 бит
 
-        encoded!(MARKER_STARTER_EXPANSION, $pos << 10, $len << 24)
+        encoded!(MARKER_STARTER_EXPANSION, $pos << 4, $len << 18)
     }};
 }
 
-// стартер - декомпозиция или последовательности
-// mmmT cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
+/// стартер - декомпозиция или последовательности
+/// mmmT iiii  iiii iiii    iill llll  llcc cccc        ____ ____  ____ ____    ____ ____  _____ ____
 macro_rules! encoded_starter_decomposition_or_trie {
     ($is_trie: expr, $ccc: expr, $pos: expr, $len: expr) => {{
         assert!($ccc <= 0x3F); // 6 бит
@@ -192,22 +192,22 @@ macro_rules! encoded_starter_decomposition_or_trie {
         encoded!(
             MARKER_STARTER_DECOMPOSITION_OR_TRIE,
             is_trie << 3,
-            $ccc << 4,
-            $pos << 10,
-            $len << 24
+            $pos << 4,
+            $len << 18,
+            $ccc << 26
         )
     }};
 }
 
-// нестартер - расширение, сокращение, декомпозиция
-// mmm_ cccc  ccii iiii    iiii iiii  llll llll        ____ ____  ____ ____    ____ ____  _____ ____
+/// нестартер - расширение, сокращение, декомпозиция
+/// mmm_ iiii  iiii iiii    iill llll  llcc cccc        ____ ____  ____ ____    ____ ____  _____ ____
 macro_rules! encoded_nonstarter_trie {
     ($ccc: expr, $pos: expr, $len: expr) => {{
         assert!($ccc <= 0x3F); // 6 бит
         assert!($len <= 0xFF); // 8 бит
         assert!($pos <= 0x3FFF); // 14 бит
 
-        encoded!(MARKER_NONSTARTER_TRIE, $ccc << 4, $pos << 10, $len << 24)
+        encoded!(MARKER_NONSTARTER_TRIE, $pos << 4, $len << 18, $ccc << 26)
     }};
 }
 
