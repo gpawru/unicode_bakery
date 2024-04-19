@@ -16,6 +16,9 @@ pub const MARKER_NONSTARTER_TRIE: u8 = 0b_101;
 
 pub mod implicit;
 
+#[cfg(test)]
+mod tests;
+
 pub struct EncodeWeights<'a>
 {
     pub is_canonical: bool,
@@ -919,7 +922,10 @@ fn bake_trie(code: u32, node: &TrieNode, is_last: bool) -> Vec<u32>
 
     // отсортируем потомков по CCC
     let mut sorted_keys: Vec<&u32> = children.keys().collect();
-    sorted_keys.sort_by(|a, b| get_ccc(a).cmp(&get_ccc(b)));
+    sorted_keys.sort_by(|a, b| match get_ccc(a).cmp(&get_ccc(b)) {
+        std::cmp::Ordering::Equal => a.cmp(b),
+        other => other,
+    });
 
     let last = sorted_keys.len() - 1;
 
@@ -931,8 +937,7 @@ fn bake_trie(code: u32, node: &TrieNode, is_last: bool) -> Vec<u32>
     data
 }
 
-/// цепочка весов из их запечённых значений, где присутствует маркер продолжения цепочки
-/// (в незадействованном старшем бите)
+/// цепочка весов из их запечённых значений
 fn bake_weights_vec(weights: &Vec<Weights>) -> Vec<u32>
 {
     weights.iter().map(|w| bake_weights(w)).collect()
