@@ -186,7 +186,7 @@ macro_rules! encoded_starter_expansion {
 /// mmmT iiii  iiii iiii    iiii cccc  cc__ ____
 macro_rules! encoded_starter_decomposition_or_trie {
     ($is_trie: expr, $ccc: expr, $pos: expr) => {{
-        assert!($ccc <= 0x3F); // 6 бит
+        assert!($ccc <= 0xFF); // 8 бит
         assert!($pos <= 0xFFFF); // 16 бит
 
         let is_trie = $is_trie as u64;
@@ -837,7 +837,7 @@ fn hangul_syllables(
 ) -> Option<EncodedCodepoint<u64>>
 {
     blocking_checks!(!(0xAC00 ..= 0xD7A3).contains(&codepoint.code));
-    encoded_starter_decomposition_or_trie!(false, 0, 0xFFFF)
+    encoded_starter_decomposition_or_trie!(false, 0xFF, 0)
 }
 
 /// MARKER_STARTER_DECOMPOSITION_OR_TRIE: последовательности кодпоинтов
