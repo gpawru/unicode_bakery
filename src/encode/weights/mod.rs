@@ -185,15 +185,12 @@ macro_rules! encoded_starter_expansion {
 /// стартер - декомпозиция или последовательности
 /// mmmT iiii  iiii iiii    iiii cccc  cc__ ____
 macro_rules! encoded_starter_decomposition_or_trie {
-    ($is_trie: expr, $ccc: expr, $pos: expr) => {{
+    ($ccc: expr, $pos: expr) => {{
         assert!($ccc <= 0xFF); // 8 бит
         assert!($pos <= 0xFFFF); // 16 бит
 
-        let is_trie = $is_trie as u64;
-
         encoded!(
             MARKER_STARTER_DECOMPOSITION_OR_TRIE,
-            is_trie << 3,
             $pos << 4,
             $ccc << 20
         )
@@ -802,7 +799,7 @@ fn has_decomposition(
     assert!(ccc != 0);
 
     stats_codepoint!(stats, codepoint; description);
-    encoded_starter_decomposition_or_trie!(false, ccc, pos)
+    encoded_starter_decomposition_or_trie!(ccc, pos)
 }
 
 /// 0: вычисляемые веса
@@ -837,7 +834,7 @@ fn hangul_syllables(
 ) -> Option<EncodedCodepoint<u64>>
 {
     blocking_checks!(!(0xAC00 ..= 0xD7A3).contains(&codepoint.code));
-    encoded_starter_decomposition_or_trie!(false, 0xFF, 0)
+    encoded_starter_decomposition_or_trie!(0xFE, 0)
 }
 
 /// MARKER_STARTER_DECOMPOSITION_OR_TRIE: последовательности кодпоинтов
@@ -871,7 +868,7 @@ fn sequences(
     let ccc = 0xFF;
 
     stats_codepoint!(stats, codepoint; get_trie_description(codepoint, trie));
-    encoded_starter_decomposition_or_trie!(true, ccc, pos)
+    encoded_starter_decomposition_or_trie!(ccc, pos)
 }
 
 // --------------------------------------------------------------------------------------------------------------------
