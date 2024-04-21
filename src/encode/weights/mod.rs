@@ -867,7 +867,8 @@ fn sequences(
     let trie_vec = bake_trie(codepoint.code, trie, true);
     let (_, pos) = bake_extra(&mut extra.tries, &trie_vec);
 
-    let ccc = codepoint.ccc.compressed() as u64;
+    // вместо CCC (0) запишем 0xFF как маркер необходимости обработки
+    let ccc = 0xFF;
 
     stats_codepoint!(stats, codepoint; get_trie_description(codepoint, trie));
     encoded_starter_decomposition_or_trie!(true, ccc, pos)
