@@ -172,23 +172,22 @@ macro_rules! encoded_nonstarter_single_weights {
 }
 
 /// стартер, расширение
-/// mmm_ iiii  iiii iiii    iill llll  ll__ ____        ____ ____  ____ ____    ____ ____  _____ ____
+/// mmm_ iiii  iiii iiii    iiii llll  llll ____
 macro_rules! encoded_starter_expansion {
     ($pos: expr, $len: expr) => {{
         assert!($len <= 0xFF); // 8 бит
-        assert!($pos <= 0x3FFF); // 14 бит
+        assert!($pos <= 0xFFFF); // 16 бит
 
-        encoded!(MARKER_STARTER_EXPANSION, $pos << 4, $len << 18)
+        encoded!(MARKER_STARTER_EXPANSION, $pos << 4, $len << 20)
     }};
 }
 
 /// стартер - декомпозиция или последовательности
-/// mmmT iiii  iiii iiii    iill llll  llcc cccc        ____ ____  ____ ____    ____ ____  _____ ____
+/// mmmT iiii  iiii iiii    iiii cccc  cc__ ____
 macro_rules! encoded_starter_decomposition_or_trie {
-    ($is_trie: expr, $ccc: expr, $pos: expr, $len: expr) => {{
+    ($is_trie: expr, $ccc: expr, $pos: expr) => {{
         assert!($ccc <= 0x3F); // 6 бит
-        assert!($len <= 0xFF); // 8 бит
-        assert!($pos <= 0x3FFF); // 14 бит
+        assert!($pos <= 0xFFFF); // 16 бит
 
         let is_trie = $is_trie as u64;
 
@@ -196,21 +195,19 @@ macro_rules! encoded_starter_decomposition_or_trie {
             MARKER_STARTER_DECOMPOSITION_OR_TRIE,
             is_trie << 3,
             $pos << 4,
-            $len << 18,
-            $ccc << 26
+            $ccc << 20
         )
     }};
 }
 
 /// нестартер - расширение, сокращение, декомпозиция
-/// mmm_ iiii  iiii iiii    iill llll  llcc cccc        ____ ____  ____ ____    ____ ____  _____ ____
+/// mmm_ iiii  iiii iiii    iiii cccc  cc__ ____
 macro_rules! encoded_nonstarter_trie {
-    ($ccc: expr, $pos: expr, $len: expr) => {{
+    ($ccc: expr, $pos: expr) => {{
         assert!($ccc <= 0x3F); // 6 бит
-        assert!($len <= 0xFF); // 8 бит
-        assert!($pos <= 0x3FFF); // 14 бит
+        assert!($pos <= 0xFFFF); // 16 бит
 
-        encoded!(MARKER_NONSTARTER_TRIE, $pos << 4, $len << 18, $ccc << 26)
+        encoded!(MARKER_NONSTARTER_TRIE, $pos << 4, $ccc << 20)
     }};
 }
 
@@ -427,12 +424,12 @@ fn nonstarter_expansions(
     }
 
     let data = bake_trie(codepoint.code, trie, true);
-    let (len, pos) = bake_extra(&mut extra.tries, &data);
+    let (_, pos) = bake_extra(&mut extra.tries, &data);
 
     let ccc = codepoint.ccc.compressed() as u64;
 
     stats_codepoint!(stats, codepoint, trie);
-    encoded_nonstarter_trie!(ccc, pos, len)
+    encoded_nonstarter_trie!(ccc, pos)
 }
 
 /// MARKER_STARTER_EXPANSION: синглтоны - декомпозиция в стартер с вычисляемыми весами
@@ -716,13 +713,13 @@ fn decomposition_to_nonstarters(
         data.extend(bake_trie(entry_codepoint.code, trie, is_last));
     }
 
-    let (len, pos) = bake_extra(&mut extra.tries, &data);
+    let (_, pos) = bake_extra(&mut extra.tries, &data);
 
     // CCC последнего кодпоинта декомпозиции
     let ccc = decomposition.last()?.ccc.compressed() as u64;
 
     stats_codepoint!(stats, codepoint, trie);
-    encoded_nonstarter_trie!(ccc, pos, len)
+    encoded_nonstarter_trie!(ccc, pos)
 }
 
 /// MARKER_STARTER_DECOMPOSITION_OR_TRIE: кодпоинт с декомпозицией
@@ -797,7 +794,7 @@ fn has_decomposition(
         get_trie_description(codepoint, &encoder.trie[&decomposition[0].code])
     );
 
-    let (len, pos) = bake_extra(&mut extra.tries, &data);
+    let (_, pos) = bake_extra(&mut extra.tries, &data);
 
     // CCC последнего кодпоинта декомпозиции
     let ccc = decomposition.last()?.ccc.compressed() as u64;
@@ -805,7 +802,7 @@ fn has_decomposition(
     assert!(ccc != 0);
 
     stats_codepoint!(stats, codepoint; description);
-    encoded_starter_decomposition_or_trie!(false, ccc, pos, len)
+    encoded_starter_decomposition_or_trie!(false, ccc, pos)
 }
 
 /// 0: вычисляемые веса
@@ -840,7 +837,7 @@ fn hangul_syllables(
 ) -> Option<EncodedCodepoint<u64>>
 {
     blocking_checks!(!(0xAC00 ..= 0xD7A3).contains(&codepoint.code));
-    encoded_starter_decomposition_or_trie!(false, 0, 0, 0)
+    encoded_starter_decomposition_or_trie!(false, 0, 0xFFFF)
 }
 
 /// MARKER_STARTER_DECOMPOSITION_OR_TRIE: последовательности кодпоинтов
@@ -868,15 +865,12 @@ fn sequences(
     }
 
     let trie_vec = bake_trie(codepoint.code, trie, true);
-    let (len, pos) = bake_extra(&mut extra.tries, &trie_vec);
-
-    assert!(len <= 0xFF); // 8 бит
-    assert!(pos <= 0x3FFF); // 14 бит
+    let (_, pos) = bake_extra(&mut extra.tries, &trie_vec);
 
     let ccc = codepoint.ccc.compressed() as u64;
 
     stats_codepoint!(stats, codepoint; get_trie_description(codepoint, trie));
-    encoded_starter_decomposition_or_trie!(true, ccc, pos, len)
+    encoded_starter_decomposition_or_trie!(true, ccc, pos)
 }
 
 // --------------------------------------------------------------------------------------------------------------------
