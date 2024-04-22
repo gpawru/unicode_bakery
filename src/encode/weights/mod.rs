@@ -189,11 +189,7 @@ macro_rules! encoded_starter_decomposition_or_trie {
         assert!($ccc <= 0xFF); // 8 бит
         assert!($pos <= 0xFFFF); // 16 бит
 
-        encoded!(
-            MARKER_STARTER_DECOMPOSITION_OR_TRIE,
-            $pos << 4,
-            $ccc << 20
-        )
+        encoded!(MARKER_STARTER_DECOMPOSITION_OR_TRIE, $pos << 4, $ccc << 20)
     }};
 }
 

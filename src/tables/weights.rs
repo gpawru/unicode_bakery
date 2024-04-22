@@ -105,6 +105,8 @@ impl WeightsTables
 
         // место под индексы больших блоков
 
+        assert_eq!(self.primary_index_len(), 0x600);
+
         self.index
             .extend(vec![0; self.primary_index_len() as usize]);
 
@@ -113,7 +115,7 @@ impl WeightsTables
         let mut big_block = vec![];
         let mut small_block = vec![];
 
-        for code in 0 .. bb_count * bb_size {
+        for code in (0 .. bb_count * bb_size).chain(0xE0000 .. 0xE0200) {
             small_block.push(match self.encode(code, encoder) {
                 Some(encoded) => encoded.value,
                 None => 0,
@@ -181,7 +183,17 @@ impl WeightsTables
 
                     big_block.clear();
 
-                    let current_block = (code / bb_size) as usize;
+                    let mut current_block = (code / bb_size) as usize;
+
+                    // частный случай: ignorable веса U+E0000 .. U+E0200
+                    if current_block >= bb_count as usize {
+                        let ignorables_base = (0xE0000 / bb_size) as usize;
+                        let moved_to = current_block - ignorables_base + bb_count as usize;
+
+                        current_block = moved_to;
+                    }
+
+                    assert!(current_block < 0x600);
 
                     self.index[current_block] = index;
                 }
