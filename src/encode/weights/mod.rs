@@ -784,7 +784,7 @@ fn has_decomposition(
     let description = format!(
         "{}{}",
         description,
-        get_trie_description(codepoint, &encoder.trie[&decomposition[0].code])
+        get_trie_description(&decomposition[0], &encoder.trie[&decomposition[0].code])
     );
 
     let (_, pos) = bake_extra(&mut extra.tries, &data);
@@ -999,7 +999,14 @@ fn get_trie_description(codepoint: &Codepoint, trie: &TrieNode) -> String
         return "".to_owned();
     }
 
-    let mut description = "\n".to_owned();
+    let mut description = format!(
+        "{}\n",
+        trie.weights
+            .iter()
+            .map(|w| w.formatted())
+            .collect::<String>()
+    );
+
     for (code2, node) in trie.children.as_ref().unwrap().iter() {
         description.push_str(
             format!(
