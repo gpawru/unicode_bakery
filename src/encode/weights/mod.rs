@@ -15,6 +15,8 @@ pub const MARKER_STARTER_TRIE: u8 = 0b_100;
 pub const MARKER_NONSTARTER_SINGLE_WEIGHTS: u8 = 0b_101;
 pub const MARKER_NONSTARTER_TRIE: u8 = 0b_110;
 
+pub const MARKER_CCC_HANGUL: u8 = 0xFF;
+
 pub mod implicit;
 
 pub struct EncodeWeights<'a>
@@ -838,7 +840,7 @@ fn hangul_syllables(
 ) -> Option<EncodedCodepoint<u64>>
 {
     blocking_checks!(!(0xAC00 ..= 0xD7A3).contains(&codepoint.code));
-    encoded_starter_decomposition!(0xFE, 0)
+    encoded_starter_decomposition!(MARKER_CCC_HANGUL as u64, 0)
 }
 
 /// MARKER_STARTER_TRIE: последовательности кодпоинтов
