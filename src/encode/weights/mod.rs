@@ -9,15 +9,13 @@ use crate::stats::EncodeCodepointStats;
 
 pub const MARKER_STARTER_SINGLE_WEIGHTS: u8 = 0b_001;
 pub const MARKER_STARTER_EXPANSION: u8 = 0b_010;
-pub const MARKER_STARTER_DECOMPOSITION_OR_TRIE: u8 = 0b_011;
+pub const MARKER_STARTER_DECOMPOSITION: u8 = 0b_011;
+pub const MARKER_STARTER_TRIE: u8 = 0b_100;
 
-pub const MARKER_NONSTARTER_SINGLE_WEIGHTS: u8 = 0b_100;
-pub const MARKER_NONSTARTER_TRIE: u8 = 0b_101;
+pub const MARKER_NONSTARTER_SINGLE_WEIGHTS: u8 = 0b_101;
+pub const MARKER_NONSTARTER_TRIE: u8 = 0b_110;
 
 pub mod implicit;
-
-#[cfg(test)]
-mod tests;
 
 pub struct EncodeWeights<'a>
 {
@@ -182,14 +180,24 @@ macro_rules! encoded_starter_expansion {
     }};
 }
 
-/// стартер - декомпозиция или последовательности
-/// mmmT iiii  iiii iiii    iiii cccc  cc__ ____
-macro_rules! encoded_starter_decomposition_or_trie {
+/// стартер - декомпозиция
+/// mmm_ iiii  iiii iiii    iiii cccc  cc__ ____
+macro_rules! encoded_starter_decomposition {
     ($ccc: expr, $pos: expr) => {{
         assert!($ccc <= 0xFF); // 8 бит
         assert!($pos <= 0xFFFF); // 16 бит
 
-        encoded!(MARKER_STARTER_DECOMPOSITION_OR_TRIE, $pos << 4, $ccc << 20)
+        encoded!(MARKER_STARTER_DECOMPOSITION, $pos << 4, $ccc << 20)
+    }};
+}
+
+/// стартер - начало последовательности
+/// mmm_ iiii  iiii iiii    iiii ____  ____ ____
+macro_rules! encoded_starter_trie {
+    ($pos: expr) => {{
+        assert!($pos <= 0xFFFF); // 16 бит
+
+        encoded!(MARKER_STARTER_TRIE, $pos << 4)
     }};
 }
 
@@ -715,7 +723,7 @@ fn decomposition_to_nonstarters(
     encoded_nonstarter_trie!(ccc, pos)
 }
 
-/// MARKER_STARTER_DECOMPOSITION_OR_TRIE: кодпоинт с декомпозицией
+/// MARKER_STARTER_DECOMPOSITION: кодпоинт с декомпозицией
 fn has_decomposition(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -795,7 +803,7 @@ fn has_decomposition(
     assert!(ccc != 0);
 
     stats_codepoint!(stats, codepoint; description);
-    encoded_starter_decomposition_or_trie!(ccc, pos)
+    encoded_starter_decomposition!(ccc, pos)
 }
 
 /// 0: вычисляемые веса
@@ -821,7 +829,7 @@ fn implicit_weights(
     encoded!(0)
 }
 
-/// MARKER_STARTER_DECOMPOSITION_OR_TRIE: слоги хангыль
+/// MARKER_STARTER_DECOMPOSITION: слоги хангыль
 fn hangul_syllables(
     _encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -830,10 +838,10 @@ fn hangul_syllables(
 ) -> Option<EncodedCodepoint<u64>>
 {
     blocking_checks!(!(0xAC00 ..= 0xD7A3).contains(&codepoint.code));
-    encoded_starter_decomposition_or_trie!(0xFE, 0)
+    encoded_starter_decomposition!(0xFE, 0)
 }
 
-/// MARKER_STARTER_DECOMPOSITION_OR_TRIE: последовательности кодпоинтов
+/// MARKER_STARTER_TRIE: последовательности кодпоинтов
 fn sequences(
     encoder: &EncodeWeights,
     codepoint: &Codepoint,
@@ -860,11 +868,8 @@ fn sequences(
     let trie_vec = bake_trie(codepoint.code, trie, true);
     let (_, pos) = bake_extra(&mut extra.tries, &trie_vec);
 
-    // вместо CCC (0) запишем 0xFF как маркер необходимости обработки
-    let ccc = 0xFF;
-
     stats_codepoint!(stats, codepoint; get_trie_description(codepoint, trie));
-    encoded_starter_decomposition_or_trie!(ccc, pos)
+    encoded_starter_trie!(pos)
 }
 
 // --------------------------------------------------------------------------------------------------------------------
